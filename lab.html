@@ -1,0 +1,420 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>lab</title>
+<style>body{margin:0;background:#333;overflow:hidden}</style></head><body>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.1/examples/jsm/" } }</script>
+<script type="module">
+import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
+const V3 = THREE.Vector3, rng = Math.random;
+const r = new THREE.WebGLRenderer({ antialias: true }); r.setPixelRatio(1.5); r.setSize(innerWidth, innerHeight); document.body.appendChild(r.domElement); r.setScissorTest(true);
+r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 1.05;
+const sc = new THREE.Scene(); sc.background = new THREE.Color(0x8fa3b5);
+sc.add(new THREE.HemisphereLight(0xdfeaff, 0x7a6d58, 1.5)); const d = new THREE.DirectionalLight(0xfff1d8, 2.2); d.position.set(-1.5, 2.5, 1.5); sc.add(d);
+const M = (o) => new THREE.MeshStandardMaterial(Object.assign({ roughness: .9 }, o));
+function canvasTex(size, draw){ const c = document.createElement("canvas"); c.width = c.height = size; draw(c.getContext("2d"), size); const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; return t; }
+const envTex = (() => { const c = document.createElement("canvas"); c.width = 128; c.height = 64; const g = c.getContext("2d");
+  const gr = g.createLinearGradient(0, 0, 0, 64); gr.addColorStop(0, "#9fc4ee"); gr.addColorStop(.45, "#f4f1e6"); gr.addColorStop(.52, "#b9ab90"); gr.addColorStop(1, "#4a4338");
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 64); g.fillStyle = "#fff"; g.beginPath(); g.arc(30, 14, 7, 0, 7); g.fill(); g.fillStyle = "rgba(255,255,255,.8)"; g.fillRect(84, 20, 14, 8);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; const es = new THREE.Scene(); es.add(new THREE.Mesh(new THREE.SphereGeometry(10, 24, 12), new THREE.MeshBasicMaterial({ map: t, side: THREE.BackSide })));
+  const pm = new THREE.PMREMGenerator(r), out = pm.fromScene(es).texture; pm.dispose(); return out; })();
+const gm = {
+  metal: M({ color: 0x33373d, roughness: .36, metalness: .85, envMap: envTex, envMapIntensity: 1.25 }),
+  steel: M({ color: 0x1b1d20, roughness: .48, metalness: .8, envMap: envTex, envMapIntensity: 1.1 }),
+  worn: M({ color: 0x8e9299, roughness: .3, metalness: .9, envMap: envTex, envMapIntensity: 1.2 }),
+  black: M({ color: 0x050505, roughness: 1 }), poly: M({ color: 0x1d1f22, roughness: .72, envMap: envTex, envMapIntensity: .3 }),
+  brass: M({ color: 0xd9a441, roughness: .3, metalness: .9, envMap: envTex }), pad: M({ color: 0x111213, roughness: .6 }),
+};
+const UP = new V3(0, 1, 0);
+function bx(p, mat, sx, sy, sz, x, y, z, rx = 0){ const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), mat); m.position.set(x, y, z); m.rotation.x = rx; p.add(m); return m; }
+function cz(p, mat, r1, r2, len, x, y, z, seg = 12){ const g = new THREE.CylinderGeometry(r1, r2, len, seg); g.rotateX(Math.PI / 2); const m = new THREE.Mesh(g, mat); m.position.set(x, y, z); p.add(m); return m; }
+function cxl(p, mat, r, len, x, y, z, seg = 10){ const g = new THREE.CylinderGeometry(r, r, len, seg); g.rotateZ(Math.PI / 2); const m = new THREE.Mesh(g, mat); m.position.set(x, y, z); p.add(m); return m; }
+//__BEGIN_SHARED__
+// ---- texture vẽ theo mặt nghiêng (kiểu model game cổ điển): toạ độ vẽ = (f, y) tính bằng mét, mọi khối đùn của khẩu súng lấy màu theo vị trí
+function gunTexture(f0, f1, y0, y1, draw, W = 1024){
+  const H = Math.round(W * (y1 - y0) / (f1 - f0)), c = document.createElement("canvas"); c.width = W; c.height = H; const g = c.getContext("2d"), k = W / (f1 - f0);
+  g.setTransform(k, 0, 0, -k, -f0 * k, y1 * k); draw(g, k);
+  g.setTransform(1, 0, 0, 1, 0, 0); for (let i = 0; i < W * H / 22; i++){ const v = rng() < .5 ? 0 : 255; g.fillStyle = `rgba(${v},${v},${v},${rng() * .05})`; g.fillRect(rng() * W, rng() * H, 1 + rng() * 2, 1); }   // hạt nhiễu
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; t.userData.box = { f0, f1, y0, y1 }; return t;
+}
+const sideUV = b => { const uv = (v, i) => new THREE.Vector2((v[i * 3] - b.f0) / (b.f1 - b.f0), (v[i * 3 + 1] - b.y0) / (b.y1 - b.y0)); return { generateTopUV: (g, v, a, b2, c) => [uv(v, a), uv(v, b2), uv(v, c)], generateSideWallUV: (g, v, a, b2, c, d) => [uv(v, a), uv(v, b2), uv(v, c), uv(v, d)] }; };
+const paintedMat = (tex, o) => { const m = M(Object.assign({ map: tex, envMap: envTex }, o)); m.userData.box = tex.userData.box; return m; };
+// các nét vẽ dùng chung
+const PNT = {
+  poly(g, pts, fill){ g.beginPath(); pts.forEach((q, i) => i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1])); g.closePath(); if (fill){ g.fillStyle = fill; g.fill(); } },
+  shade(g, pts, y0, y1, top = "rgba(255,255,255,.22)", bot = "rgba(0,0,0,.42)"){ g.save(); PNT.poly(g, pts); g.clip(); const gr = g.createLinearGradient(0, y1, 0, y0); gr.addColorStop(0, top); gr.addColorStop(.45, "rgba(128,128,128,0)"); gr.addColorStop(1, bot); g.fillStyle = gr; g.fillRect(-2, -2, 4, 4); g.restore(); },
+  wear(g, pts, w = .0011, col = "rgba(255,255,255,.55)"){ PNT.poly(g, pts); g.lineJoin = "round"; g.strokeStyle = "rgba(0,0,0,.55)"; g.lineWidth = w * 2.2; g.stroke(); g.strokeStyle = col; g.lineWidth = w; g.stroke(); },
+  line(g, x0, y0, x1, y1, w, col){ g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.lineWidth = w; g.strokeStyle = col; g.stroke(); },
+  groove(g, x0, y0, x1, y1, w = .0012){ PNT.line(g, x0, y0, x1, y1, w, "rgba(0,0,0,.75)"); PNT.line(g, x0 + w * .7, y0 - w * .7, x1 + w * .7, y1 - w * .7, w * .5, "rgba(255,255,255,.3)"); },
+  screw(g, x, y, r = .0028){ g.beginPath(); g.arc(x, y, r, 0, 7); g.fillStyle = "#3a3c40"; g.fill(); g.lineWidth = r * .3; g.strokeStyle = "rgba(0,0,0,.8)"; g.stroke(); g.beginPath(); g.arc(x - r * .2, y + r * .2, r * .7, 0, 7); g.fillStyle = "rgba(255,255,255,.18)"; g.fill(); PNT.line(g, x - r * .6, y - r * .3, x + r * .6, y + r * .3, r * .28, "rgba(0,0,0,.85)"); },
+  brushed(g, x0, y0, x1, y1, n, a = .1){ for (let i = 0; i < n; i++){ const y = y0 + rng() * (y1 - y0), x = x0 + rng() * (x1 - x0), l = .01 + rng() * .06; PNT.line(g, x, y, x + l, y, .0003 + rng() * .0005, `rgba(${rng() < .5 ? "255,255,255" : "0,0,0"},${rng() * a})`); } },
+  scratches(g, x0, y0, x1, y1, n){ for (let i = 0; i < n; i++){ const x = x0 + rng() * (x1 - x0), y = y0 + rng() * (y1 - y0), a = rng() * 6.28, l = .003 + rng() * .012; PNT.line(g, x, y, x + Math.cos(a) * l, y + Math.sin(a) * l * .4, .0003, `rgba(255,255,255,${.15 + rng() * .3})`); } },
+  marks(g, x, y, n, h = .0035, col = "rgba(0,0,0,.6)"){ for (let i = 0; i < n; i++){ const w = .0012 + rng() * .003; g.fillStyle = col; g.fillRect(x, y, w, h * (.6 + rng() * .4)); x += w + .0012; } },
+  hatch(g, pts, step = .0034, col = "rgba(255,255,255,.13)"){ g.save(); PNT.poly(g, pts); g.clip(); for (let d = -.4; d < .4; d += step){ PNT.line(g, d, -.3, d + .3, .3, step * .3, col); PNT.line(g, d + .3, -.3, d, .3, step * .3, "rgba(0,0,0,.5)"); } g.restore(); },
+  dirt(g, x0, y0, x1, y1, n){ for (let i = 0; i < n; i++){ const x = x0 + rng() * (x1 - x0), y = y0 + rng() * (y1 - y0), r = .004 + rng() * .014, gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, `rgba(20,16,12,${.08 + rng() * .14})`); gr.addColorStop(1, "rgba(0,0,0,0)"); g.fillStyle = gr; g.fillRect(x - r, y - r, 2 * r, 2 * r); } },
+};
+// đùn biên dạng nhìn ngang [f (về phía nòng), y] thành khối dày t, bo cạnh; holes = các lỗ khoét xuyên; pts có thể là THREE.Shape
+function ext(p, mat, pts, t, bev = .003, x = 0, holes){
+  let sh = pts; if (!(pts instanceof THREE.Shape)){ sh = new THREE.Shape(); pts.forEach((q, i) => i ? sh.lineTo(q[0], q[1]) : sh.moveTo(q[0], q[1])); }
+  if (holes) for (const h of holes){ const ph = new THREE.Path(); h.forEach((q, i) => i ? ph.lineTo(q[0], q[1]) : ph.moveTo(q[0], q[1])); sh.holes.push(ph); }
+  const b = Math.min(bev, t / 2 - .0005), o = { depth: t - 2 * b, bevelEnabled: true, bevelThickness: b, bevelSize: b, bevelSegments: 3, steps: 1, curveSegments: 10 };
+  if (mat.userData.box) o.UVGenerator = sideUV(mat.userData.box);
+  const g = new THREE.ExtrudeGeometry(sh, o);
+  g.translate(0, 0, -(t - 2 * b) / 2); g.rotateY(Math.PI / 2);
+  const m = new THREE.Mesh(g, mat); m.position.x = x; p.add(m); return m;
+}
+const slot = (f0, f1, y0, y1) => { const rr = (y1 - y0) / 2, a = []; for (let i = 0; i <= 6; i++){ const t = Math.PI / 2 + i / 6 * Math.PI; a.push([f0 + rr + Math.cos(t) * rr, (y0 + y1) / 2 + Math.sin(t) * rr]); } for (let i = 0; i <= 6; i++){ const t = -Math.PI / 2 + i / 6 * Math.PI; a.push([f1 - rr + Math.cos(t) * rr, (y0 + y1) / 2 + Math.sin(t) * rr]); } return a; };
+const spline = (pts, n = 5) => new THREE.SplineCurve(pts.map(q => new THREE.Vector2(q[0], q[1]))).getPoints(pts.length * n).map(v => [v.x, v.y]);
+const texGrain = canvasTex(128, (g, s) => { g.fillStyle = "#808080"; g.fillRect(0, 0, s, s); for (let i = 0; i < 5000; i++){ const v = 90 + rng() * 80 | 0; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(rng() * s, rng() * s, 1.5, 1.5); } });
+texGrain.repeat.set(70, 70);
+const texSteel = canvasTex(256, (g, s) => { g.fillStyle = "#d0d0d0"; g.fillRect(0, 0, s, s);
+  for (let i = 0; i < 900; i++){ const v = 170 + rng() * 70 | 0; g.fillStyle = `rgba(${v},${v},${v},.35)`; g.fillRect(rng() * s, rng() * s, 8 + rng() * 60, 1); }
+  for (let i = 0; i < 30; i++){ g.strokeStyle = `rgba(255,255,255,${.15 + rng() * .25})`; g.lineWidth = .6; g.beginPath(); const x = rng() * s, y = rng() * s; g.moveTo(x, y); g.lineTo(x + rng() * 40 - 20, y + rng() * 14 - 7); g.stroke(); } });
+texSteel.repeat.set(14, 14);
+const sm = {   // vật liệu riêng cho tiểu liên: thép phốt-phát đen, nhựa sần, cao su
+  steel: M({ color: 0x5d626a, map: texSteel, roughness: .46, metalness: .8, envMap: envTex, envMapIntensity: 1.3 }),
+  dark: M({ color: 0x3a3d43, map: texSteel, roughness: .5, metalness: .75, envMap: envTex, envMapIntensity: 1.2 }),
+  poly: M({ color: 0x2c2e33, roughness: .7, bumpMap: texGrain, bumpScale: .9, envMap: envTex, envMapIntensity: .45 }),
+  rubber: M({ color: 0x1a1a1c, roughness: .95, bumpMap: texGrain, bumpScale: 1.2 }),
+  red: M({ color: 0xc8202a, roughness: .6 }), white: M({ color: 0xe8e8e8, roughness: .6 }),
+  green: M({ color: 0x4d5a3a, roughness: .76, bumpMap: texGrain, bumpScale: .9, envMap: envTex, envMapIntensity: .3 }), green2: M({ color: 0x3c472d, roughness: .8, bumpMap: texGrain, bumpScale: .9 }),
+  nickel: M({ color: 0xb9bec6, map: texSteel, roughness: .32, metalness: .92, envMap: envTex, envMapIntensity: 1.25 }),
+  lens: M({ color: 0x3f6f9a, roughness: .05, metalness: .95, envMap: envTex, envMapIntensity: 2 }),
+};
+const SMP = {
+  recv: [[-.102, .012], [.19, .012], [.19, .058], [-.102, .058]],
+  rib: [[-.095, .02], [.06, .02], [.07, .03], [.07, .046], [-.095, .046]],
+  lower: spline([[-.088, .014], [.096, .014], [.098, -.01], [.09, -.046], [.06, -.054], [.03, -.052], [.022, -.064], [.012, -.1], [.006, -.122], [-.012, -.128], [-.034, -.126], [-.044, -.118], [-.038, -.09], [-.03, -.06], [-.036, -.03], [-.06, -.014], [-.088, -.012], [-.088, .014]], 3),
+  well: [[.1, .014], [.152, .014], [.156, -.034], [.098, -.03]],
+  mag: spline([[.105, -.02], [.108, -.08], [.118, -.135], [.136, -.19], [.184, -.176], [.166, -.125], [.154, -.075], [.149, -.02]], 4),
+  hand: spline([[.19, .006], [.19, .064], [.3, .063], [.372, .058], [.378, .034], [.368, .012], [.3, .004], [.19, .006]], 3),
+  stock: spline([[-.104, .064], [-.104, .012], [-.14, -.002], [-.22, -.02], [-.3, -.04], [-.338, -.044], [-.338, .06], [-.3, .066], [-.2, .067], [-.104, .064]], 3),
+  fsight: [[.386, .02], [.418, .02], [.414, .078], [.39, .078]], rsight: [[-.085, .068], [-.04, .068], [-.045, .08], [-.08, .08]],
+};
+let smgMat = null;
+function smgMats(){
+  if (smgMat) return smgMat;
+  const tex = gunTexture(-.37, .5, -.21, .11, g => {
+    g.fillStyle = "#4d5056"; g.fillRect(-1, -1, 2, 2); PNT.brushed(g, -.37, -.21, .5, .11, 2200, .09);
+    // thép dập: thân, gân, mối hàn điểm, chữ khắc
+    PNT.shade(g, SMP.recv, .012, .058, "rgba(255,255,255,.2)", "rgba(0,0,0,.45)"); PNT.wear(g, SMP.rib, .0009, "rgba(255,255,255,.28)");
+    for (let f = -.09; f < .18; f += .018){ g.beginPath(); g.arc(f, .0155, .0014, 0, 7); g.fillStyle = "rgba(0,0,0,.5)"; g.fill(); }
+    PNT.marks(g, .082, .05, 10, .0036, "rgba(230,230,230,.5)"); PNT.marks(g, -.05, .05, 7, .003, "rgba(230,230,230,.4)");
+    PNT.screw(g, -.07, .022, .0034); PNT.screw(g, .086, .022, .0034);
+    PNT.shade(g, SMP.well, -.034, .014, "rgba(255,255,255,.14)", "rgba(0,0,0,.45)"); PNT.groove(g, .1, .0, .154, -.002, .0009);
+    PNT.shade(g, SMP.fsight, .02, .078); PNT.shade(g, SMP.rsight, .068, .08);
+    // băng đạn: gân dập cong + mòn
+    PNT.poly(g, SMP.mag, "#3a3d42"); PNT.shade(g, SMP.mag, -.19, -.02, "rgba(255,255,255,.16)", "rgba(0,0,0,.4)");
+    for (const o of [0, .012]){ g.beginPath(); g.moveTo(.118 + o, -.03); g.quadraticCurveTo(.122 + o, -.11, .152 + o, -.178); g.lineWidth = .0014; g.strokeStyle = "rgba(0,0,0,.6)"; g.stroke(); g.beginPath(); g.moveTo(.1195 + o, -.03); g.quadraticCurveTo(.1235 + o, -.11, .1535 + o, -.178); g.lineWidth = .0007; g.strokeStyle = "rgba(255,255,255,.3)"; g.stroke(); }
+    // nhựa: cụm cò, ốp lót tay, báng
+    for (const k of ["lower", "hand", "stock"]){ PNT.poly(g, SMP[k], "#232427"); PNT.shade(g, SMP[k], k === "lower" ? -.128 : k === "hand" ? .004 : -.044, k === "lower" ? .014 : .066, "rgba(255,255,255,.13)", "rgba(0,0,0,.5)"); }
+    for (let i = 0; i < 2600; i++){ const x = -.36 + rng() * .86, y = -.2 + rng() * .3; g.fillStyle = `rgba(255,255,255,${rng() * .05})`; g.fillRect(x, y, .0008, .0008); }
+    for (let i = 0; i < 8; i++) PNT.groove(g, -.028 + i * .0026, -.066 - i * .0075, .016 + i * .0006, -.062 - i * .0078, .0013);          // khía tay cầm
+    g.fillStyle = "#e9e9e9"; g.fillRect(-.03, .002, .0045, .0045); g.fillStyle = "#d0202a"; g.fillRect(-.042, .002, .0045, .0045); g.fillRect(-.056, .002, .008, .0045);   // ký hiệu chế độ bắn
+    g.beginPath(); g.arc(-.012, .004, .0055, 0, 7); g.fillStyle = "#3a3c40"; g.fill(); PNT.line(g, -.012, .004, -.03, -.004, .0022, "#3a3c40");
+    for (const y of [.018, .028]) PNT.groove(g, .2, y, .36, y, .0011);                                                             // gân ốp lót tay
+    PNT.groove(g, -.11, .03, -.33, -.01, .001); PNT.screw(g, -.13, .05, .003); PNT.screw(g, -.31, .04, .003);
+    // mòn cạnh, bụi bẩn, xước
+    for (const k of ["recv", "well", "fsight", "rsight", "mag"]) PNT.wear(g, SMP[k], .001, "rgba(255,255,255,.5)");
+    for (const k of ["lower", "hand", "stock"]) PNT.wear(g, SMP[k], .0009, "rgba(255,255,255,.2)");
+    PNT.dirt(g, -.36, -.2, .5, .1, 70); PNT.scratches(g, -.1, .012, .19, .06, 90);
+  }, 2048);
+  smgMat = { steel: paintedMat(tex, { roughness: .46, metalness: .8, envMapIntensity: 1.1 }), poly: paintedMat(tex, { roughness: .78, metalness: 0, envMapIntensity: .28, bumpMap: texGrain, bumpScale: .9 }) };
+  return smgMat;
+}
+function buildSMG(lod){
+  const g = new THREE.Group(), P = {}, L = -1, m = smgMats();   // L: phía trái súng (x âm) — mặt người chơi nhìn thấy
+  // --- hộp khoá nòng thép dập: thân + sống tròn phía trên + gân dập
+  ext(g, m.steel, SMP.recv, .037, .008);
+  cz(g, sm.steel, .0186, .0186, .29, 0, .056, -.044, 18).scale.y = .78;
+  ext(g, m.steel, SMP.rib, .0395, .002);                       // gân dập dọc thân
+  if (!lod) for (const f of [-.075, -.02, .035, .09]) for (const sx of [-1, 1]) bx(g, sm.dark, .006, .004, .016, sx * .013, .0705, -f);   // ngàm gắn kính
+  cz(g, sm.dark, .0215, .0215, .012, 0, .04, .108, 16).scale.set(.86, 1.12, 1); cz(g, sm.steel, .008, .008, .006, 0, .04, .116, 10);   // nắp đuôi + chốt
+  // --- thước ngắm trống xoay
+  ext(g, m.steel, SMP.rsight, .026, .003);
+  { const dr = new THREE.Mesh(new THREE.CylinderGeometry(.0125, .0125, .015, 16), sm.steel); dr.position.set(0, .088, .062); dr.rotation.x = -.12; g.add(dr);
+    if (!lod) for (let i = 0; i < 4; i++){ const n = bx(g, gm.black, .004, .009, .003, Math.sin(i * 1.57) * .0115, .09, .062 + Math.cos(i * 1.57) * .0115); n.rotation.y = i * 1.57; } }
+  // --- cụm cò + tay cầm nhựa (khoét lỗ vành cò)
+  ext(g, m.poly, SMP.lower, .03, .007, 0, [[[.036, -.014], [.084, -.014], [.08, -.036], [.07, -.044], [.04, -.044]]]);
+  ext(g, sm.steel, spline([[.062, -.012], [.068, -.012], [.064, -.026], [.056, -.038], [.052, -.036], [.057, -.024], [.062, -.012]], 3), .006, .001);   // cò
+  if (!lod){
+    for (let i = 0; i < 7; i++) bx(g, gm.black, .0315, .0025, .03, 0, -.068 - i * .008, .012 + i * .0026, -.33);        // khía tay cầm
+    cxl(g, sm.steel, .0055, .012, L * .018, -.004, .012, 10); ext(g, sm.steel, [[-.03, -.008], [.004, -.002], [.004, .004], [-.03, 0]], .003, .0006, L * .0185);   // cần chọn chế độ bắn
+    bx(g, sm.white, .001, .004, .004, L * .0156, .004, -.028); bx(g, sm.red, .001, .004, .004, L * .0156, .004, -.04); bx(g, sm.red, .001, .004, .007, L * .0156, .004, -.053);   // ký hiệu an toàn / phát một / liên thanh
+    for (const f of [-.07, .086]) cxl(g, sm.steel, .0042, .04, 0, .022, -f, 10);                                         // chốt hãm
+  }
+  // --- cổ băng đạn + lẫy tháo băng
+  ext(g, m.steel, SMP.well, .033, .004);
+  ext(g, sm.dark, [[.094, -.03], [.1, -.03], [.1, -.058], [.09, -.062]], .012, .002);
+  // --- băng đạn cong 30 viên có gân
+  P.mag = new THREE.Group(); g.add(P.mag);
+  ext(P.mag, m.steel, SMP.mag, .023, .003);
+  ext(P.mag, m.steel, spline([[.115, -.03], [.118, -.08], [.128, -.132], [.144, -.176], [.17, -.168], [.156, -.122], [.144, -.076], [.139, -.03]], 4), .0262, .0012);
+  ext(P.mag, sm.steel, [[.132, -.186], [.19, -.169], [.192, -.176], [.134, -.194]], .027, .002);
+  // --- ốp lót tay nhựa có 3 khe tản nhiệt
+  ext(g, m.poly, SMP.hand, .045, .012, 0, lod ? null : [slot(.215, .252, .04, .05), slot(.268, .305, .04, .05), slot(.321, .356, .04, .05)]);
+  if (!lod) cz(g, gm.black, .012, .012, .17, 0, .04, -.28, 8);                                                           // lòng ốp tối
+  // --- ống kéo khoá nòng + tay kéo bên trái
+  cz(g, sm.steel, .0128, .0128, .225, 0, .074, -.3, 16); cz(g, sm.dark, .0138, .0138, .012, 0, .074, -.412, 16);
+  bx(g, gm.black, .003, .006, .12, L * .0122, .076, -.3);
+  P.bolt = new THREE.Group(); g.add(P.bolt);
+  cxl(P.bolt, sm.dark, .0045, .022, L * .023, .076, -.35, 8); cxl(P.bolt, sm.poly, .0085, .012, L * .037, .076, -.35, 12);
+  bx(P.bolt, gm.worn, .003, .016, .05, .0178, .04, -.06);                                                               // khoá nòng lộ qua cửa thoát vỏ
+  if (!lod) bx(g, gm.black, .002, .02, .06, .0182, .04, -.065);
+  // --- nòng + đầu nòng 3 ngạnh
+  cz(g, sm.dark, .0082, .0082, .1, 0, .03, -.42, 14); cz(g, sm.steel, .0105, .0105, .016, 0, .03, -.452, 14); cz(g, sm.dark, .009, .0095, .022, 0, .03, -.472, 14);
+  if (!lod) for (let i = 0; i < 3; i++){ const lug = bx(g, sm.steel, .005, .0035, .012, 0, .03, -.452); lug.position.x = Math.sin(i * 2.094) * .011; lug.position.y = .03 + Math.cos(i * 2.094) * .011; lug.rotation.z = -i * 2.094; }
+  cz(g, gm.black, .0048, .0048, .002, 0, .03, -.4835, 10);
+  // --- đầu ruồi có vòng bảo vệ
+  ext(g, m.steel, SMP.fsight, .014, .003);
+  { const ring = new THREE.Mesh(new THREE.TorusGeometry(.0165, .0032, 8, 22), sm.dark); ring.position.set(0, .094, -.402); g.add(ring); bx(g, sm.steel, .0028, .02, .0028, 0, .088, -.402); }
+  // --- báng nhựa cố định + đệm cao su + khe luồn dây
+  ext(g, m.poly, SMP.stock, .034, .012, 0, lod ? null : [slot(-.3, -.262, .0, .012)]);
+  ext(g, sm.rubber, [[-.338, -.048], [-.35, -.046], [-.35, .06], [-.338, .062]], .036, .004);
+  if (!lod){ for (let i = 0; i < 5; i++) bx(g, gm.black, .037, .003, .013, 0, -.03 + i * .02, .345); cxl(g, sm.steel, .004, .042, 0, .05, .13, 8); }
+  P.muzzle = new V3(0, .03, -.49); P.eject = new V3(.03, .05, -.06); P.gripR = new V3(0, -.062, .014); P.gripL = new V3(0, .0, -.285); P.sightY = .1; P.hand = "fore";
+  g.userData = P; return g;
+}
+const SNP = {
+  stock: spline([[-.36, .05], [-.36, -.07], [-.33, -.078], [-.22, -.06], [-.12, -.03], [-.07, -.036], [-.046, -.11], [-.012, -.118], [.012, -.1], [.03, -.04], [.06, -.012], [.2, -.004], [.44, .004], [.47, .02], [.47, .046], [.2, .05], [-.06, .052], [-.2, .062], [-.3, .064], [-.36, .05]], 3),
+  hole: spline([[-.16, -.014], [-.1, -.01], [-.086, .018], [-.11, .034], [-.17, .03], [-.19, .008], [-.16, -.014]], 3),
+  cheek: [[-.3, .06], [-.16, .058], [-.16, .08], [-.19, .086], [-.29, .086]],
+  recv: [[-.07, .05], [.22, .05], [.22, .086], [.2, .092], [-.06, .092], [-.07, .084]],
+  mag: [[.1, 0], [.166, 0], [.17, -.062], [.104, -.068]],
+};
+let snpMat = null;
+function sniperMats(){
+  if (snpMat) return snpMat;
+  const tex = gunTexture(-.39, .5, -.13, .1, g => {
+    g.fillStyle = "#4f5c3b"; g.fillRect(-1, -1, 2, 2);
+    for (let i = 0; i < 46; i++){ const x = -.38 + rng() * .87, y = -.12 + rng() * .21, r = .012 + rng() * .03; g.beginPath(); for (let k = 0; k < 7; k++){ const a = k / 7 * 6.283, rr = r * (.6 + rng() * .6); g.lineTo(x + Math.cos(a) * rr * 1.6, y + Math.sin(a) * rr); } g.fillStyle = ["rgba(58,70,42,.55)", "rgba(96,108,70,.5)", "rgba(40,48,30,.45)"][i % 3]; g.fill(); }   // loang màu sơn
+    PNT.shade(g, SNP.stock, -.118, .064, "rgba(255,255,255,.16)", "rgba(0,0,0,.5)"); PNT.shade(g, SNP.cheek, .058, .086, "rgba(255,255,255,.12)", "rgba(0,0,0,.35)");
+    for (let i = 0; i < 9; i++) PNT.groove(g, -.04 + i * .003, -.05 - i * .0075, .006 + i * .0012, -.046 - i * .0078, .0013);             // khía tay cầm
+    for (const y of [.012, .024]) PNT.groove(g, .24, y, .44, y + .006, .0011);                                                           // gân ốp tay
+    PNT.groove(g, -.34, -.02, -.2, .0, .001); PNT.screw(g, -.33, .03, .0034); PNT.screw(g, .09, .03, .0034); PNT.screw(g, .3, .03, .0034); PNT.screw(g, -.06, .0, .003);
+    PNT.wear(g, SNP.hole, .0012, "rgba(220,230,190,.5)"); PNT.wear(g, SNP.stock, .0012, "rgba(220,230,190,.5)"); PNT.wear(g, SNP.cheek, .001, "rgba(220,230,190,.4)");
+    for (let i = 0; i < 90; i++){ const x = -.37 + rng() * .84, y = -.11 + rng() * .17; PNT.line(g, x, y, x + .004 + rng() * .012, y + (rng() - .5) * .004, .0005, `rgba(210,220,180,${.1 + rng() * .25})`); }   // trầy sơn
+    // thép: hộp khoá nòng, băng đạn
+    PNT.poly(g, SNP.recv, "#4b4e54"); PNT.shade(g, SNP.recv, .05, .092, "rgba(255,255,255,.26)", "rgba(0,0,0,.4)"); PNT.groove(g, -.06, .066, .21, .066, .001);
+    PNT.marks(g, .1, .072, 11, .004, "rgba(230,230,230,.5)"); PNT.marks(g, .0, .056, 6, .003, "rgba(230,230,230,.4)"); PNT.screw(g, -.04, .076, .003); PNT.screw(g, .19, .06, .003);
+    PNT.poly(g, SNP.mag, "#34373c"); PNT.shade(g, SNP.mag, -.068, 0); PNT.groove(g, .112, -.01, .116, -.06, .0012); PNT.groove(g, .154, -.006, .158, -.056, .0012);
+    PNT.wear(g, SNP.recv, .001); PNT.wear(g, SNP.mag, .001); PNT.dirt(g, -.38, -.12, .49, .09, 60);
+  }, 2048);
+  snpMat = { steel: paintedMat(tex, { roughness: .45, metalness: .8, envMapIntensity: 1.1 }), poly: paintedMat(tex, { roughness: .78, metalness: 0, envMapIntensity: .25, bumpMap: texGrain, bumpScale: .9 }) };
+  return snpMat;
+}
+function buildSniper(lod){
+  const g = new THREE.Group(), P = {}, L = -1, m = sniperMats();
+  // --- báng liền ốp tay bằng nhựa xanh ô-liu, có lỗ ngón cái
+  ext(g, m.poly, SNP.stock, .042, .011, 0, lod ? null : [SNP.hole]);
+  ext(g, m.poly, SNP.cheek, .03, .01);                       // gối má
+  ext(g, sm.rubber, [[-.36, -.074], [-.374, -.072], [-.374, .05], [-.36, .054]], .044, .004);                              // đệm vai
+  ext(g, sm.steel, [[.014, -.046], [.07, -.046], [.082, -.006], [.075, -.006], [.066, -.04], [.014, -.04]], .014, .002);   // vành cò
+  ext(g, sm.steel, spline([[.046, -.008], [.052, -.008], [.048, -.022], [.04, -.034], [.036, -.032], [.041, -.02], [.046, -.008]], 3), .006, .001);
+  if (!lod) for (let i = 0; i < 6; i++) bx(g, gm.black, .0435, .0025, .028, 0, -.05 - i * .009, .028 + i * .003, -.3);     // khía tay cầm
+  // --- hộp khoá nòng thép + ổ khoá nòng
+  ext(g, m.steel, SNP.recv, .034, .008);
+  cz(g, sm.dark, .0145, .0145, .03, 0, .07, .086, 14); if (!lod) bx(g, gm.black, .002, .016, .07, .0168, .072, -.07);
+  P.bolt = new THREE.Group(); g.add(P.bolt);
+  cxl(P.bolt, sm.steel, .0055, .042, .036, .068, .02, 8); { const kn = new THREE.Mesh(new THREE.SphereGeometry(.0125, 12, 9), sm.dark); kn.position.set(.06, .066, .02); P.bolt.add(kn); }
+  // --- nòng dài có rãnh + loa hãm giật
+  cz(g, sm.dark, .0122, .0105, .5, 0, .07, -.47, 16); cz(g, sm.steel, .0145, .0145, .02, 0, .07, -.225, 16);
+  if (!lod) for (let i = 0; i < 6; i++){ const fl = bx(g, gm.black, .0035, .002, .3, 0, .07, -.44); fl.position.x = Math.sin(i * 1.047) * .0112; fl.position.y = .07 + Math.cos(i * 1.047) * .0112; fl.rotation.z = -i * 1.047; }
+  cz(g, sm.steel, .017, .017, .065, 0, .07, -.752, 16); cz(g, gm.black, .0065, .0065, .002, 0, .07, -.7855, 10);
+  if (!lod) for (const f of [.73, .748, .766]) bx(g, gm.black, .036, .007, .008, 0, .07, -f);
+  // --- kính ngắm: thân ống, chuông vật kính, thị kính, núm chỉnh, đai kẹp
+  cz(g, sm.dark, .015, .015, .27, 0, .136, -.08, 18); cz(g, sm.dark, .015, .026, .07, 0, .136, -.245, 18); cz(g, sm.dark, .026, .026, .035, 0, .136, -.2975, 18);
+  cz(g, sm.dark, .021, .015, .05, 0, .136, .08, 18); cz(g, sm.rubber, .022, .022, .03, 0, .136, .12, 18);
+  cz(g, sm.lens, .0235, .0235, .002, 0, .136, -.3155, 18); cz(g, gm.black, .019, .019, .002, 0, .136, .1355, 18);
+  { const t1 = new THREE.Mesh(new THREE.CylinderGeometry(.011, .011, .02, 14), sm.steel); t1.position.set(0, .158, -.08); g.add(t1); cxl(g, sm.steel, .011, .02, L * .024, .136, -.08, 14); cxl(g, sm.steel, .009, .014, .022, .136, -.08, 12); }
+  for (const f of [.005, .15]){ ext(g, sm.steel, [[f, .09], [f + .026, .09], [f + .026, .124], [f, .124]], .026, .003); cz(g, sm.steel, .0185, .0185, .022, 0, .136, -(f + .013), 16); }
+  // --- băng đạn + chân chống gập
+  P.mag = new THREE.Group(); g.add(P.mag); ext(P.mag, m.steel, SNP.mag, .03, .004);
+  if (!lod){ ext(g, sm.steel, [[.4, -.012], [.43, -.012], [.43, .004], [.4, .004]], .04, .003); for (const sx of [-1, 1]){ cz(g, sm.dark, .0052, .0052, .21, sx * .017, -.014, -.31, 8); bx(g, sm.rubber, .014, .014, .022, sx * .017, -.014, -.2); } }
+  P.muzzle = new V3(0, .07, -.79); P.eject = new V3(.03, .08, -.06); P.gripR = new V3(0, -.07, .022); P.gripL = new V3(0, -.012, -.3); P.sightY = .136; P.hand = "fore";
+  g.userData = P; return g;
+}
+// đùn một MẶT CẮT ngang [x, y] dọc theo thân súng từ f0 tới f1 (dùng cho khối nòng / khối trượt có mặt vát)
+function extZ(p, mat, sec, f0, f1){
+  const sh = new THREE.Shape(); sec.forEach((q, i) => i ? sh.lineTo(q[0], q[1]) : sh.moveTo(q[0], q[1]));
+  const o = { depth: f1 - f0, bevelEnabled: false, steps: 1 }, b = mat.userData.box;
+  if (b){ const uv = (v, k) => new THREE.Vector2((f0 + v[k * 3 + 2] - b.f0) / (b.f1 - b.f0), (v[k * 3 + 1] - b.y0) / (b.y1 - b.y0)); o.UVGenerator = { generateTopUV: (g, v, a, b2, c) => [uv(v, a), uv(v, b2), uv(v, c)], generateSideWallUV: (g, v, a, b2, c, d) => [uv(v, a), uv(v, b2), uv(v, c), uv(v, d)] }; }
+  const g = new THREE.ExtrudeGeometry(sh, o); g.rotateY(Math.PI); const m = new THREE.Mesh(g, mat); m.position.z = -f0; p.add(m); return m;
+}
+const sqG = pts => pts.map(([f, y]) => [f, y < -.056 ? -.056 + (y + .056) * .8 : y]);   // rút ngắn tay cầm cho đúng tỉ lệ
+const DE = {   // khẩu Đại Bàng .50 — biên dạng theo súng thật: khối nòng cố định hình thang, khối trượt phía sau, khung có vành cò vuông + đuôi chống cắn
+  frame: sqG([[-.05, .02], [.2, .02], [.207, .012], [.2, -.004], [.106, -.004], [.106, -.046], [.1, -.054], [.04, -.054], [.03, -.056], [.012, -.118], [-.052, -.126], [-.058, -.118], [-.046, -.03], [-.052, -.004], [-.061, .006], [-.05, .02]]),
+  guardHole: [[.044, -.01], [.098, -.01], [.098, -.044], [.094, -.047], [.042, -.047], [.038, -.03]],
+  grip: sqG(spline([[-.044, -.014], [.03, -.014], [.036, -.03], [.03, -.046], [.034, -.058], [.027, -.072], [.03, -.084], [.021, -.1], [.016, -.114], [-.05, -.122], [-.056, -.112], [-.045, -.03], [-.044, -.014]], 3)),
+  magBase: sqG([[-.056, -.126], [.02, -.118], [.023, -.131], [-.058, -.14]]),
+  barrelSec: [[-.016, .024], [.016, .024], [.016, .042], [.0085, .061], [.0085, .066], [-.0085, .066], [-.0085, .061], [-.016, .042]],
+  slideSec: [[-.0165, .022], [.0165, .022], [.0165, .05], [.011, .064], [-.011, .064], [-.0165, .05]],
+  barrelSide: [[.065, .024], [.228, .024], [.228, .066], [.065, .066]], slideSide: [[-.045, .022], [.065, .022], [.065, .064], [-.045, .064]],
+};
+let deMat = null;
+function deagleMats(){
+  if (deMat) return deMat;
+  const tex = gunTexture(-.08, .24, -.15, .08, g => {
+    g.fillStyle = "#c2c5c9"; g.fillRect(-1, -1, 2, 2); PNT.brushed(g, -.08, -.15, .24, .08, 1500, .06);
+    // ---- khối nòng: phần vát phía trên sáng hơn, rãnh dọc, chữ khắc, 3 khe hãm giật ở đầu nòng
+    PNT.shade(g, DE.barrelSide, .024, .066, "rgba(255,255,255,.28)", "rgba(0,0,0,.3)");
+    g.fillStyle = "rgba(0,0,0,.16)"; g.fillRect(.065, .024, .163, .018);                                             // mặt đứng phía dưới tối hơn mặt vát
+    PNT.groove(g, .066, .042, .228, .042, .0009);
+    { const gr = g.createLinearGradient(0, .051, 0, .044); gr.addColorStop(0, "#5b5e63"); gr.addColorStop(1, "#9fa3a8"); g.fillStyle = gr; g.beginPath(); g.moveTo(.094, .051); g.lineTo(.2, .051); g.arc(.2, .0475, .0035, Math.PI / 2, -Math.PI / 2, true); g.lineTo(.094, .044); g.arc(.094, .0475, .0035, -Math.PI / 2, Math.PI / 2, true); g.fill(); PNT.line(g, .094, .0438, .2, .0438, .0006, "rgba(255,255,255,.5)"); }   // rãnh dọc
+    PNT.marks(g, .104, .033, 12, .0036, "rgba(40,42,46,.7)"); PNT.marks(g, .112, .0275, 8, .0026, "rgba(40,42,46,.55)");
+    for (let i = 0; i < 3; i++){ g.fillStyle = "#1a1b1d"; g.beginPath(); const x = .204 + i * .0078; g.moveTo(x, .052); g.lineTo(x + .0042, .052); g.lineTo(x + .0052, .0655); g.lineTo(x + .001, .0655); g.fill(); }
+    PNT.wear(g, DE.barrelSide, .001);
+    // ---- khối trượt: khía kéo xiên, cần an toàn đen, cửa thoát vỏ
+    PNT.shade(g, DE.slideSide, .022, .064, "rgba(255,255,255,.26)", "rgba(0,0,0,.32)");
+    for (let i = 0; i < 6; i++){ const x = -.004 - i * .0062; g.fillStyle = "rgba(20,22,25,.85)"; g.beginPath(); g.moveTo(x, .027); g.lineTo(x + .003, .027); g.lineTo(x - .003, .059); g.lineTo(x - .006, .059); g.fill(); PNT.line(g, x + .0034, .027, x - .0026, .059, .0006, "rgba(255,255,255,.45)"); }
+    g.beginPath(); g.arc(-.02, .046, .0058, 0, 7); g.fillStyle = "#151618"; g.fill(); g.beginPath(); g.moveTo(-.02, .051); g.lineTo(-.04, .046); g.lineTo(-.04, .041); g.lineTo(-.02, .041); g.fill(); g.fillStyle = "#d0202a"; g.beginPath(); g.arc(-.012, .056, .0016, 0, 7); g.fill();
+    g.fillStyle = "#222326"; g.fillRect(.022, .047, .036, .011); PNT.line(g, .022, .047, .058, .047, .0007, "rgba(255,255,255,.45)");
+    PNT.groove(g, .065, .023, .065, .065, .0012); PNT.wear(g, DE.slideSide, .001);
+    // ---- khung: khe khung/khối trượt, ray dưới, cần giữ khoá nòng, chốt tháo, ốc
+    PNT.shade(g, DE.frame, -.126, .02, "rgba(255,255,255,.1)", "rgba(0,0,0,.42)");
+    PNT.groove(g, -.05, .021, .228, .0225, .0012); PNT.groove(g, .066, .014, .2, .014, .0007);
+    for (let i = 0; i < 7; i++){ g.fillStyle = "rgba(20,22,25,.8)"; g.fillRect(.116 + i * .0115, -.004, .005, .0055); }
+    g.fillStyle = "#1b1c1f"; g.beginPath(); g.moveTo(.028, .014); g.lineTo(.072, .012); g.lineTo(.074, .006); g.lineTo(.03, .006); g.fill(); g.beginPath(); g.arc(.034, .01, .0045, 0, 7); g.fill();
+    g.beginPath(); g.arc(.104, .008, .0042, 0, 7); g.fillStyle = "#1b1c1f"; g.fill(); PNT.screw(g, .15, .006, .0024); PNT.screw(g, -.03, .008, .003); PNT.screw(g, .012, -.004, .0024);
+    PNT.wear(g, DE.frame, .001); PNT.wear(g, DE.guardHole, .0009, "rgba(255,255,255,.45)");
+    // ---- ốp cao su: hạt sần, rãnh ngón tay, huy hiệu
+    PNT.poly(g, DE.grip, "#161719");
+    g.save(); PNT.poly(g, DE.grip); g.clip(); for (let i = 0; i < 2600; i++){ const x = -.06 + rng() * .1, y = -.125 + rng() * .115; g.beginPath(); g.arc(x, y, .0007, 0, 7); g.fillStyle = `rgba(255,255,255,${.05 + rng() * .1})`; g.fill(); } g.restore();
+    PNT.shade(g, DE.grip, -.122, -.014, "rgba(255,255,255,.08)", "rgba(0,0,0,.5)");
+    g.beginPath(); g.ellipse(-.012, -.062, .009, .0065, 0, 0, 7); g.fillStyle = "#0c0c0d"; g.fill(); g.lineWidth = .0008; g.strokeStyle = "rgba(255,255,255,.3)"; g.stroke();
+    PNT.wear(g, DE.grip, .0009, "rgba(255,255,255,.16)"); PNT.poly(g, DE.magBase, "#2b2d31"); PNT.wear(g, DE.magBase, .0009, "rgba(255,255,255,.35)");
+    PNT.dirt(g, -.07, -.14, .23, .07, 22); PNT.scratches(g, -.045, -.005, .228, .066, 90);
+  });
+  deMat = { steel: paintedMat(tex, { roughness: .34, metalness: .88, envMapIntensity: 1.2 }), rubber: paintedMat(tex, { roughness: .92, metalness: 0, envMapIntensity: .1 }) };
+  return deMat;
+}
+function buildDeagle(lod){
+  const g = new THREE.Group(), P = {}, m = deagleMats();
+  ext(g, m.steel, DE.frame, .028, .004, 0, [DE.guardHole]);                                                   // khung liền vành cò vuông + đuôi chống cắn
+  ext(g, m.rubber, DE.grip, .037, .009);                                                                      // ốp cao su ôm tay cầm, có rãnh ngón
+  ext(g, sm.dark, spline([[.066, -.01], [.073, -.01], [.07, -.024], [.062, -.036], [.057, -.034], [.062, -.022], [.066, -.01]], 3), .007, .001);   // cò
+  extZ(g, m.steel, DE.barrelSec, .065, .228);                                                                 // khối nòng mặt cắt hình thang + ray trên nóc
+  if (!lod) for (let i = 0; i < 8; i++) bx(g, gm.black, .0175, .0022, .0042, 0, .0662, -.082 - i * .0135);       // rãnh ngang của ray
+  cz(g, gm.black, .0064, .0064, .003, 0, .044, -.2275, 14); cz(g, sm.dark, .009, .009, .002, 0, .044, -.2285, 14); cz(g, sm.dark, .0038, .0038, .003, 0, .0305, -.2275, 10);   // lỗ nòng + chốt khí
+  bx(g, gm.black, .004, .008, .012, 0, .07, -.212);                                                           // đầu ruồi
+  for (const sx of [-1, 1]) bx(g, m.steel, .003, .008, .1, sx * .0168, .019, -.115);                              // ray dẫn khối trượt chạy dưới nòng
+  P.bolt = new THREE.Group(); g.add(P.bolt);
+  extZ(P.bolt, m.steel, DE.slideSec, -.045, .065);                                                            // khối trượt
+  bx(P.bolt, gm.black, .02, .007, .012, 0, .0675, .03); bx(P.bolt, m.steel, .007, .008, .013, 0, .068, .03);     // thước ngắm
+  for (const sx of [-1, 1]){ cxl(P.bolt, gm.black, .0056, .004, sx * .0178, .046, .02, 12); bx(P.bolt, gm.black, .003, .008, .02, sx * .0178, .045, .03); }   // cần an toàn hai bên
+  bx(P.bolt, gm.black, .013, .003, .034, .0075, .0635, -.04);                                                   // cửa thoát vỏ
+  ext(g, sm.dark, spline([[-.05, .026], [-.045, .03], [-.046, .05], [-.056, .058], [-.064, .05], [-.058, .038], [-.05, .026]], 3), .009, .002);   // búa đập
+  P.mag = new THREE.Group(); g.add(P.mag); ext(P.mag, m.steel, DE.magBase, .03, .003); ext(P.mag, sm.dark, sqG([[-.034, -.03], [.012, -.03], [.0, -.12], [-.046, -.124]]), .02, .001);
+  P.muzzle = new V3(0, .044, -.235); P.eject = new V3(.02, .06, -.04); P.gripR = new V3(0, -.058, .02); P.gripL = new V3(-.03, -.074, .016); P.sightY = .0745; P.hand = "grip";
+  g.userData = P; return g;
+}
+// ================= AK (súng trường tấn công kiểu AKM): thép đen, ốp gỗ, băng đạn cong — dựng theo tỉ lệ súng thật
+PNT.wood = (g, pts, y0, y1, base = "#8b4a20") => { g.save(); PNT.poly(g, pts); g.clip(); g.fillStyle = base; g.fillRect(-2, -2, 4, 4);
+  for (let i = 0; i < 520; i++){ const x = -.4 + rng() * 1.2, y = y0 + rng() * (y1 - y0), l = .03 + rng() * .16, a = (rng() - .5) * .06; g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + l / 2, y + a + (rng() - .5) * .004, x + l, y + a); g.lineWidth = .0004 + rng() * .0012; g.strokeStyle = rng() < .55 ? `rgba(48,20,8,${.12 + rng() * .3})` : `rgba(226,150,78,${.08 + rng() * .2})`; g.stroke(); }
+  for (let i = 0; i < 5; i++){ const x = -.35 + rng() * 1, y = y0 + rng() * (y1 - y0); g.beginPath(); g.ellipse(x, y, .006 + rng() * .008, .003 + rng() * .003, 0, 0, 7); g.strokeStyle = "rgba(40,16,6,.4)"; g.lineWidth = .0009; g.stroke(); }
+  const gr = g.createLinearGradient(0, y1, 0, y0); gr.addColorStop(0, "rgba(255,225,180,.28)"); gr.addColorStop(.3, "rgba(255,255,255,0)"); gr.addColorStop(1, "rgba(20,6,0,.55)"); g.fillStyle = gr; g.fillRect(-2, -2, 4, 4); g.restore(); };
+PNT.rivet = (g, x, y, r = .0026) => { g.beginPath(); g.arc(x, y, r, 0, 7); g.fillStyle = "#3d4046"; g.fill(); g.lineWidth = r * .35; g.strokeStyle = "rgba(0,0,0,.8)"; g.stroke(); g.beginPath(); g.arc(x - r * .3, y + r * .3, r * .45, 0, 7); g.fillStyle = "rgba(255,255,255,.35)"; g.fill(); };
+const AKP = {
+  recv: [[-.07, 0], [.19, 0], [.2, .018], [.2, .064], [-.07, .064]],
+  coverSec: [[-.021, .064], [.021, .064], [.021, .074], [.013, .087], [-.013, .087], [-.021, .074]], coverSide: [[-.062, .064], [.145, .064], [.145, .087], [-.062, .087]],
+  rsight: [[.145, .064], [.2, .064], [.2, .08], [.152, .087]],
+  stock: spline([[-.068, .06], [-.068, .006], [-.1, -.004], [-.2, -.03], [-.29, -.052], [-.335, -.056], [-.335, .038], [-.29, .046], [-.2, .056], [-.13, .064], [-.068, .06]], 3),
+  grip: spline([[-.004, 0], [.036, 0], [.03, -.02], [.02, -.05], [.004, -.1], [-.036, -.106], [-.046, -.094], [-.03, -.05], [-.026, 0], [-.004, 0]], 3),
+  guard: [[.036, -.044], [.094, -.044], [.106, 0], [.099, 0], [.089, -.038], [.036, -.038]],
+  mag: spline([[.108, .004], [.112, -.06], [.128, -.12], [.158, -.182], [.218, -.158], [.19, -.1], [.176, -.045], [.17, .004]], 4),
+  handL: spline([[.2, .006], [.2, .05], [.395, .05], [.4, .03], [.39, .012], [.3, .004], [.2, .006]], 3),
+  handU: [[.205, .054], [.37, .054], [.37, .082], [.36, .09], [.215, .09], [.205, .082]],
+  gasblock: [[.44, .028], [.475, .028], [.468, .084], [.44, .084]], fsight: [[.552, .03], [.59, .03], [.582, .092], [.566, .092]],
+};
+let akMat = null;
+function akMats(){
+  if (akMat) return akMat;
+  const W = "rgba(196,201,207,.62)";   // màu thép lộ ra ở chỗ mòn
+  const tex = gunTexture(-.36, .7, -.2, .11, g => {
+    g.fillStyle = "#2a2c30"; g.fillRect(-1, -1, 2, 2); PNT.brushed(g, -.36, -.2, .7, .11, 2600, .07);
+    // ---- gỗ: báng, tay cầm, ốp lót tay
+    PNT.wood(g, AKP.stock, -.056, .064); PNT.wood(g, AKP.grip, -.106, 0, "#7a3c18"); PNT.wood(g, AKP.handL, .004, .05); PNT.wood(g, AKP.handU, .054, .09, "#93501f");
+    for (let i = 0; i < 7; i++) PNT.groove(g, -.03 + i * .0022, -.03 - i * .0095, .022 - i * .002, -.026 - i * .0098, .0011);                     // khía tay cầm
+    PNT.groove(g, .21, .028, .385, .028, .0011); PNT.screw(g, -.3, -.02, .0034); PNT.screw(g, -.3, .024, .0034); PNT.screw(g, .01, -.06, .0028);
+    for (const k of ["stock", "grip", "handL", "handU"]) PNT.wear(g, AKP[k], .001, "rgba(255,210,150,.28)");
+    // ---- hộp khoá nòng thép dập: lõm trên cổ băng, đinh tán, chữ khắc
+    PNT.shade(g, AKP.recv, 0, .064, "rgba(255,255,255,.16)", "rgba(0,0,0,.45)");
+    { g.fillStyle = "rgba(0,0,0,.42)"; g.beginPath(); g.roundRect(.112, .018, .05, .026, .006); g.fill(); PNT.line(g, .116, .0185, .158, .0185, .0008, "rgba(255,255,255,.3)"); }
+    for (const [x, y] of [[-.058, .012], [-.058, .05], [-.03, .03], [.02, .01], [.06, .008], [.09, .052], [.172, .012], [.172, .05], [.188, .032], [.04, .05]]) PNT.rivet(g, x, y);
+    PNT.marks(g, .0, .034, 9, .0034, "rgba(200,205,210,.5)"); PNT.marks(g, -.05, .022, 5, .0028, "rgba(200,205,210,.4)");
+    PNT.groove(g, -.07, .0635, .2, .0635, .0011);
+    // ---- nắp hộp khoá nòng: gân ngang
+    PNT.shade(g, AKP.coverSide, .064, .087, "rgba(255,255,255,.22)", "rgba(0,0,0,.2)"); for (let f = -.045; f < .14; f += .03) PNT.groove(g, f, .066, f, .086, .0016);
+    PNT.shade(g, AKP.rsight, .064, .087); PNT.shade(g, AKP.gasblock, .028, .084); PNT.shade(g, AKP.fsight, .03, .092); PNT.shade(g, AKP.guard, -.044, 0);
+    // ---- băng đạn thép cong có gân dập
+    PNT.poly(g, AKP.mag, "#303236"); PNT.shade(g, AKP.mag, -.182, .004, "rgba(255,255,255,.14)", "rgba(0,0,0,.4)");
+    for (const o of [.01, .026, .042]){ g.beginPath(); g.moveTo(.112 + o, -.004); g.quadraticCurveTo(.118 + o, -.1, .162 + o * 1.05, -.176 + o * .32); g.lineWidth = .0016; g.strokeStyle = "rgba(0,0,0,.65)"; g.stroke(); g.beginPath(); g.moveTo(.1136 + o, -.004); g.quadraticCurveTo(.1196 + o, -.1, .1636 + o * 1.05, -.176 + o * .32); g.lineWidth = .0007; g.strokeStyle = "rgba(255,255,255,.26)"; g.stroke(); }
+    PNT.groove(g, .112, -.014, .172, -.012, .001);
+    // ---- mòn cạnh lộ thép, xước, bụi
+    for (const k of ["recv", "coverSide", "rsight", "guard", "mag", "gasblock", "fsight"]) PNT.wear(g, AKP[k], .0011, W);
+    PNT.scratches(g, -.07, 0, .2, .087, 110); PNT.scratches(g, .11, -.18, .22, 0, 50); PNT.dirt(g, -.35, -.19, .69, .1, 60);
+  }, 2048);
+  akMat = { steel: paintedMat(tex, { roughness: .5, metalness: .78, envMapIntensity: 1 }), wood: paintedMat(tex, { roughness: .42, metalness: 0, envMapIntensity: .32 }) };
+  return akMat;
+}
+function buildRifle(lod){
+  const g = new THREE.Group(), P = {}, m = akMats();
+  ext(g, m.steel, AKP.recv, .044, .004);                                                                   // hộp khoá nòng
+  extZ(g, m.steel, AKP.coverSec, -.062, .145);                                                             // nắp hộp có sống tròn
+  ext(g, m.steel, AKP.rsight, .034, .004); bx(g, sm.dark, .014, .005, .085, 0, .092, -.235, -.045); bx(g, sm.dark, .024, .012, .004, 0, .1, -.196);   // bệ + lá thước ngắm
+  ext(g, m.wood, AKP.stock, .038, .01); bx(g, sm.dark, .036, .098, .008, 0, -.008, .339);                    // báng gỗ + đế báng
+  ext(g, m.wood, AKP.grip, .03, .008);
+  ext(g, m.steel, AKP.guard, .014, .002);
+  ext(g, sm.dark, spline([[.058, 0], [.066, 0], [.062, -.016], [.052, -.03], [.047, -.027], [.054, -.016], [.058, 0]], 3), .006, .001);   // cò
+  ext(g, m.wood, AKP.handL, .044, .01); ext(g, m.wood, AKP.handU, .036, .012);                              // ốp lót tay dưới / trên
+  cz(g, sm.dark, .0095, .0095, .44, 0, .04, -.41, 14); cz(g, sm.dark, .0078, .0078, .1, 0, .072, -.415, 12);   // nòng + ống trích khí
+  ext(g, m.steel, AKP.gasblock, .024, .003); ext(g, m.steel, AKP.fsight, .013, .002);
+  bx(g, sm.dark, .003, .024, .013, .011, .1, -.574); bx(g, sm.dark, .003, .024, .013, -.011, .1, -.574); bx(g, sm.dark, .0028, .018, .0028, 0, .098, -.574);   // tai bảo vệ + đầu ruồi
+  { const mz = cz(g, sm.dark, .0135, .012, .05, 0, .04, -.647, 14); cz(g, gm.black, .006, .006, .002, 0, .04, -.6725, 10); }                // loa che lửa
+  P.mag = new THREE.Group(); g.add(P.mag); ext(P.mag, m.steel, AKP.mag, .027, .003);
+  P.bolt = new THREE.Group(); g.add(P.bolt); bx(P.bolt, gm.worn, .004, .02, .078, .0225, .05, -.075); cxl(P.bolt, sm.dark, .0055, .03, .038, .05, -.108, 8);   // khoá nòng + tay kéo (bên phải)
+  if (!lod){
+    bx(g, gm.black, .003, .022, .09, .0222, .05, -.055);                                                    // cửa thoát vỏ
+    ext(g, sm.dark, [[-.02, .014], [.078, .026], [.078, .034], [-.02, .024]], .003, .0005, .0238);            // cần an toàn (bên phải)
+    cz(g, sm.dark, .003, .003, .25, 0, .022, -.51, 6);                                                      // thông nòng
+    ext(g, sm.dark, [[.098, -.004], [.108, -.004], [.112, -.03], [.104, -.03]], .008, .001);                  // lẫy băng đạn
+    for (const sx of [-1, 1]) bx(g, gm.black, .003, .005, .024, sx * .0185, .074, -.25);                        // khe ốp trên
+    cxl(g, sm.dark, .004, .05, 0, .03, .3, 8);                                                              // khâu dây đeo
+  }
+  P.muzzle = new V3(0, .04, -.68); P.eject = new V3(.035, .06, -.07); P.gripR = new V3(0, -.055, .02); P.gripL = new V3(0, .0, -.3); P.sightY = .1085; P.hand = "fore";
+  g.userData = P; return g;
+}
+//__END_SHARED__
+const q = new URLSearchParams(location.search);
+const wsel = q.get("w") || "smg";
+const gun = ({ sniper: buildSniper, deagle: buildDeagle, smg: buildSMG, rifle: buildRifle })[wsel](false); sc.add(gun); const fpHip = wsel === "sniper" ? [.125, -.15, -.33] : wsel === "deagle" ? [.085, -.095, -.33] : [.12, -.135, -.3];
+// ---- thử gắn súng vào bộ tay có xương (rig AKM cho súng dài, rig Glock cho súng ngắn)
+const RIG = { akm: { mesh: "AKM_model", len: .88, org: [-2.73, .98], hip: [.1, -.075, .16] }, glock: { mesh: "Glock19", len: .19, org: [1.34, .907], hip: [.07, -.07, -.3] } };
+let rigRoot = null;
+if (q.get("rig")){
+  const key = wsel === "deagle" ? "glock" : "akm", c = RIG[key], src = await new GLTFLoader().loadAsync(`models/${key}.glb`), obj = SkeletonUtils.clone(src.scene);
+  const root = new THREE.Group(), holder = new THREE.Group(), gms = []; obj.updateMatrixWorld(true);
+  obj.traverse(o => { if (o.isMesh){ o.frustumCulled = false; if (o.name.startsWith(c.mesh) || (o.parent && o.parent.name === c.mesh)) gms.push(o); } });
+  const bb = new THREE.Box3(); for (const m of gms){ m.computeBoundingBox(); bb.union(m.boundingBox.clone().applyMatrix4(m.matrixWorld)); m.visible = false; }
+  const k = c.len / (bb.max.x - bb.min.x), cz0 = (bb.min.z + bb.max.z) / 2;
+  holder.rotation.y = Math.PI / 2; holder.scale.setScalar(k); holder.position.set(-cz0 * k, -bb.max.y * k, bb.min.x * k); holder.add(obj); root.add(holder);
+  const g2 = ({ sniper: buildSniper, deagle: buildDeagle, smg: buildSMG, rifle: buildRifle })[wsel](false);
+  g2.position.set(0, (c.org[1] - bb.max.y) * k, (bb.min.x - c.org[0]) * k); root.add(g2);
+  const mx = new THREE.AnimationMixer(obj); const clip = src.animations.find(a => a.name.endsWith("|" + (q.get("a") || "Idle"))); mx.clipAction(clip).play(); mx.setTime(+(q.get("t") || 0));
+  root.position.set(...c.hip); root.rotation.y = .02; sc.add(root); rigRoot = root; window.__rig = { bb, k, g2pos: g2.position.toArray() };
+}
+const views = [  // [camera pos, look at]
+  [[-(q.get("w") === "deagle" ? .6 : 1.6), .1, -(q.get("w") === "deagle" ? .08 : .2)], [0, 0, -(q.get("w") === "deagle" ? .08 : .2)]],          // mặt trái
+  [[1.6, .1, -.2], [0, -.0, -.2]],           // mặt phải
+  [[-.7, .36, .7], [0, .02, -.15]],           // chéo sau-trái
+];
+function draw(){
+  const W = innerWidth / 2, H = innerHeight / 2;
+  views.forEach((v, i) => { const cam = new THREE.PerspectiveCamera(32, W / H, .01, 10); cam.position.set(...v[0]); cam.lookAt(...v[1]);
+    if (rigRoot){ rigRoot.visible = false; gun.visible = true; }
+    const x = (i % 2) * W, y = i < 2 ? H : 0; r.setViewport(x, y, W, H); r.setScissor(x, y, W, H); gun.position.set(0, 0, 0); gun.rotation.set(0, 0, 0); gun.scale.setScalar(1); r.render(sc, cam); });
+  // góc nhìn thứ nhất như trong game
+  const fp = new THREE.PerspectiveCamera(52, W / H, .01, 6); gun.position.set(...fpHip); gun.rotation.set(0, .085, 0); gun.scale.setScalar(.82); if (rigRoot){ gun.visible = false; rigRoot.visible = true; }
+  r.setViewport(W, 0, W, H); r.setScissor(W, 0, W, H); r.render(sc, fp);
+}
+draw(); setInterval(draw, 500); window.__ok = true;
+</script></body></html>
