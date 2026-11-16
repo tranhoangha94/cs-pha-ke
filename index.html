@@ -127,7 +127,6 @@
 <div class="overlay" id="start">
   <div class="panel" style="max-width:620px">
     <h1>CAMPUS<span>·</span>STRIKE</h1>
-    <p>Chơi 5 vs 5 với bot trên map khuôn viên đại học lấy cảm hứng từ VinUni: tòa chính có tháp nhọn, quảng trường đài phun nước, căn-tin, khán đài, vườn hồng và bờ hồ. Ba chế độ: <b>Đấu đội</b> (hồi sinh liên tục, đủ số mạng thì thắng), <b>Giải cứu con tin</b> (Cảnh sát đưa 3 con tin từ phía bắc về cổng chính) và <b>Đặt bom</b> (Khủng bố đặt bom ở A — Khán đài hoặc B — Vườn hồng, Cảnh sát phải gỡ).</p>
     <div id="matchopt">
       <span>Chế độ</span><div class="seg" id="optMode"><button data-v="dm">Đấu đội (Deathmatch)</button><button data-v="hostage">Giải cứu con tin</button><button data-v="bomb">Đặt bom</button></div>
       <span>Phe của bạn</span><div class="seg" id="optTeam"><button data-v="0"></button><button data-v="1"></button></div>
@@ -158,8 +157,8 @@ import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 
 /* ============================================================================
    CAMPUS STRIKE — FPS web, toàn bộ hình học / texture / âm thanh là procedural.
-   Map: khuôn viên đại học tự dựng, lấy cảm hứng kiến trúc từ VinUni (không phải
-   bản đo vẽ chính xác). Một file, mở qua server tĩnh bất kỳ.
+   Map: khuôn viên đại học tự dựng (không phải bản đo vẽ chính xác).
+   Một file, mở qua server tĩnh bất kỳ.
    ========================================================================== */
 const V3 = THREE.Vector3, clamp = THREE.MathUtils.clamp, lerp = THREE.MathUtils.lerp;
 const smooth = (a, b, x) => { x = clamp((x - a) / (b - a), 0, 1); return x * x * (3 - 2 * x); };
@@ -1580,7 +1579,7 @@ function keyName(c){
 
 // ---------- trạng thái súng + ĐỘ GIẬT
 const wst = WEAPONS.map(w => ({ clip: w.clip, reserve: w.reserve }));
-const START_MONEY = 2500, ROUND_START_MONEY = 800, KILL_MONEY = 300, RESPAWN_MONEY = 1400, MAX_MONEY = 16000;
+const START_MONEY = 2500, ROUND_START_MONEY = 800, KILL_MONEY = 300, MAX_MONEY = 16000;
 const inv = { 1: null, 2: IDX.pistol, 3: IDX.knife, 4: null }; let money = START_MONEY, armor = 0, nades = 0, noticeT = 0, noticeTxt = "";
 const owned = i => i != null && Object.values(inv).includes(i);
 const notice = t => { noticeTxt = t; noticeT = 1.8; };
@@ -1686,7 +1685,7 @@ function renderBuy(){
   else { h = `<h3>${SHOP.main.find(m => m && m[1] === buyOpen)[0].toUpperCase()}</h3>` + SHOP[buyOpen].map((id, i) => id === "armor" ? row(i + 1, "Áo giáp", ARMOR_PRICE, money >= ARMOR_PRICE && armor < 100) : row(i + 1, WEAPONS[IDX[id]].name, WEAPONS[IDX[id]].price, money >= WEAPONS[IDX[id]].price && !(id === "grenade" && nades >= 1))).join(""); }
   el.innerHTML = h + row(0, buyOpen === "main" ? "Thoát" : "Quay lại"); el.style.display = "block";
 }
-function toggleBuy(){ if (buyOpen){ closeBuy(); return; } if (!player.alive) return; if (!inBuyZone()){ notice(`BẠN KHÔNG Ở KHU MUA (${PT ? "ĐƯỜNG BẮC" : "CỔNG CHÍNH"})`); return; } buyOpen = "main"; renderBuy(); }
+function toggleBuy(){ if (MODE === "dm"){ notice("ĐẤU ĐỘI KHÔNG MUA SÚNG — ĐI TỚI SÚNG TRÊN ĐẤT RỒI NHẶT"); return; } if (buyOpen){ closeBuy(); return; } if (!player.alive) return; if (!inBuyZone()){ notice(`BẠN KHÔNG Ở KHU MUA (${PT ? "ĐƯỜNG BẮC" : "CỔNG CHÍNH"})`); return; } buyOpen = "main"; renderBuy(); }
 function buyKey(n){
   if (n === 0){ if (buyOpen === "main") closeBuy(); else { buyOpen = "main"; renderBuy(); } return; }
   if (!inBuyZone()){ closeBuy(); notice("BẠN ĐÃ RỜI KHU MUA"); return; }
@@ -1898,7 +1897,7 @@ function damage(victim, dmg, attacker, head, weapon){
 const teamName = t => MODE === "dm" ? "ĐỘI " + TEAM[t].name : t ? "KHỦNG BỐ" : "CẢNH SÁT";
 const bombActor = { isBomb: true, name: "BOM", team: 1, pos: new V3(), alive: true, kills: 0 };   // "kẻ tấn công" khi bom nổ
 function onKill(k, v, head){
-  if (k !== v && !k.isBomb){ k.kills++; if (MODE === "dm") score[k.team]++; if (k.isPlayer) addMoney(KILL_MONEY); } $("sb").textContent = score[0]; $("sr").textContent = score[1]; $("kd").textContent = `${player.kills} / ${player.deaths}`;
+  if (k !== v && !k.isBomb){ k.kills++; if (MODE === "dm") score[k.team]++; if (k.isPlayer && MODE !== "dm") addMoney(KILL_MONEY); } $("sb").textContent = score[0]; $("sr").textContent = score[1]; $("kd").textContent = `${player.kills} / ${player.deaths}`;
   const el = document.createElement("div"); el.className = "kf" + (k.isPlayer || v.isPlayer ? " me" : "");
   el.innerHTML = `<span class="${TEAM[k.team].css}">${k.name}</span><i>${k.isBomb ? "✹ nổ" : head ? "⌖ headshot" : "︻╦╤─"}</i><span class="${TEAM[v.team].css}">${v.name}</span>`;
   const f = $("killfeed"); f.appendChild(el); setTimeout(() => el.remove(), 4200); while (f.children.length > 5) f.firstChild.remove();
@@ -1908,7 +1907,7 @@ function onKill(k, v, head){
 }
 function resetMatch(){ score[0] = score[1] = 0; $("sb").textContent = $("sr").textContent = "0"; $("banner").style.display = "none"; player.kills = player.deaths = 0; $("kd").textContent = "0 / 0";
   bots.forEach(b => { b.kills = b.deaths = 0; }); money = MODE === "dm" ? START_MONEY : ROUND_START_MONEY; roundNo = 0; clearFloorGuns(); hudSub();
-  if (MODE === "dm"){ bots.forEach(b => respawnBot(b)); spawnPlayer(); } else startRound(true);
+  if (MODE === "dm"){ bots.forEach(b => respawnBot(b)); spawnPlayer(); spawnDmGuns(); } else startRound(true);
   hudAmmo(); }
 
 // ============================================================================
@@ -2031,35 +2030,52 @@ function hudCtx(){
 }
 
 // ---------- SÚNG RƠI DƯỚI ĐẤT (kiểu CS): ai chết cũng rơi súng chính; nhặt bằng phím Dùng, đi qua thì tự nhặt nếu ô còn trống
-const floorGuns = [], FLOOR_CAP = 12, FLOOR_LIFE = 30;
+const floorGuns = [], dmPads = [], FLOOR_CAP = 12, FLOOR_LIFE = 30;
+// đấu đội: súng cắm sẵn trên lối đi, nhặt thì ô đó hồi lại sau vài giây. Chết rơi súng thì hết hạn như cũ.
+const DM_GUNS = [["rifle", -11, -9], ["smg", 11, -8], ["shotgun", 0, -3.2], ["sniper", -32, -20], ["deagle", 27, -12], ["rifle", -14, 8], ["smg", 15, 7], ["shotgun", 0, 8], ["sniper", 22, 20], ["deagle", -18, 22], ["grenade", -13, -6], ["pistol", 12, 18]];
 const floorDiscGeo = new THREE.CircleGeometry(.55, 24), floorDiscMat = new THREE.MeshBasicMaterial({ color: 0xffe28a, transparent: true, opacity: .2, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 });
 const sharedMats = new Set(Object.values(gm));
 function removeGun(f){
   const i = floorGuns.indexOf(f); if (i >= 0) floorGuns.splice(i, 1); scene.remove(f.g);
   f.g.traverse(o => { if (o.isMesh && o.geometry !== floorDiscGeo){ o.geometry.dispose(); if (!sharedMats.has(o.material)) o.material.dispose?.(); } });
 }
-function clearFloorGuns(){ while (floorGuns.length) removeGun(floorGuns[0]); }
-function dropGun(wi, x, y, z, clip, reserve){
-  if (floorGuns.length >= FLOOR_CAP) removeGun(floorGuns[0]);
+function clearFloorGuns(){ while (floorGuns.length) removeGun(floorGuns[0]); dmPads.length = 0; }
+function dropGun(wi, x, y, z, clip, reserve, opt){
+  const pin = !!opt?.pin;
+  if (!pin && floorGuns.filter(f => !f.pin).length >= FLOOR_CAP){ const o = floorGuns.find(f => !f.pin); if (o) removeGun(o); }
   const g = new THREE.Group(), gun = WEAPONS[wi].build(true);
   gun.rotation.z = Math.PI / 2; gun.position.set(0, .03, 0); gun.traverse(o => { if (o.isMesh) o.castShadow = true; }); g.add(gun);
   const disc = new THREE.Mesh(floorDiscGeo, floorDiscMat); disc.rotation.x = -Math.PI / 2; disc.position.y = .012; g.add(disc);
-  g.position.set(x, groundAt(x, z, y + .4) + .02, z); g.rotation.y = Math.random() * 6.283; scene.add(g);
-  const f = { wi, clip, reserve, g, pos: g.position, t: FLOOR_LIFE }; floorGuns.push(f); return f;
+  g.position.set(x, groundAt(x, z, (y || 0) + .4) + .02, z); g.rotation.y = Math.random() * 6.283; scene.add(g);
+  const w = WEAPONS[wi];
+  const f = { wi, clip, reserve, g, pos: g.position, t: pin ? 1e9 : FLOOR_LIFE, pin, home: pin ? { x, z, wi, clip: w.clip, reserve: w.reserve } : null }; floorGuns.push(f); return f;
+}
+function spawnDmGuns(){
+  for (const [id, x, z] of DM_GUNS){ const w = WEAPONS[IDX[id]]; dropGun(IDX[id], x, 0, z, w.clip, w.reserve, { pin: true }); }
 }
 function pickUpGun(f){
   const w = WEAPONS[f.wi], slot = w.slot, old = inv[slot];
-  if (old != null && old !== IDX.knife){ const a = Math.random() * 6.283; dropGun(old, f.pos.x + Math.cos(a) * .3, player.pos.y, f.pos.z + Math.sin(a) * .3, wst[old].clip, wst[old].reserve); }   // đổi: súng cũ rơi lại chỗ đó
+  if (w.cls === "nade" && nades >= 1){ notice("ĐANG CÓ LỰU ĐẠN"); return; }
+  const home = f.home;
+  if (old != null && old !== IDX.knife){ const a = Math.random() * 6.283; dropGun(old, f.pos.x + Math.cos(a) * .45, player.pos.y, f.pos.z + Math.sin(a) * .45, old === IDX.grenade ? 1 : wst[old].clip, old === IDX.grenade ? 0 : wst[old].reserve); if (old === IDX.grenade) nades = 0; }
   const wasCur = old === cur || f.wi === cur;
-  removeGun(f); inv[slot] = f.wi; wst[f.wi].clip = f.clip; wst[f.wi].reserve = f.reserve;
+  removeGun(f); if (home) dmPads.push({ ...home, t: 12 });
+  inv[slot] = f.wi;
+  if (w.cls === "nade"){ nades = 1; wst[f.wi].clip = 1; wst[f.wi].reserve = 0; }
+  else { wst[f.wi].clip = f.clip; wst[f.wi].reserve = f.reserve; }
   if (wasCur){ vm[cur].root.visible = false; cur = f.wi; vm[cur].root.visible = true; if (vm[cur].gl) vm[cur].play("Idle"); reloadT = 0; pending = -1; switchT = 0; }
   else switchTo(f.wi);
   sfx.click(0, .5); sfx.click(.1, .4); hudAmmo(); notice("ĐÃ NHẶT " + w.name.split(" · ")[0]);
 }
 function updateFloorGuns(dt){
   for (let i = floorGuns.length - 1; i >= 0; i--){ const f = floorGuns[i];
-    if (MODE === "dm" && (f.t -= dt) <= 0){ removeGun(f); continue; }
-    if (player.alive && inv[WEAPONS[f.wi].slot] == null && Math.abs(f.pos.y - player.pos.y) < 1.2 && dist2(f.pos, player.pos) < 1){ pickUpGun(f); continue; }   // đi qua: tự nhặt nếu ô trống
+    if (!f.pin && MODE === "dm" && (f.t -= dt) <= 0){ removeGun(f); continue; }
+    if (player.alive && (WEAPONS[f.wi].cls === "nade" ? nades < 1 : inv[WEAPONS[f.wi].slot] == null) && Math.abs(f.pos.y - player.pos.y) < 1.2 && dist2(f.pos, player.pos) < 1.15){ pickUpGun(f); continue; }
+  }
+  for (let i = dmPads.length - 1; i >= 0; i--){ const p = dmPads[i];
+    if ((p.t -= dt) > 0) continue;
+    if (player.alive && Math.hypot(player.pos.x - p.x, player.pos.z - p.z) < 1.6) continue;
+    dropGun(p.wi, p.x, 0, p.z, p.clip, p.reserve, { pin: true }); dmPads.splice(i, 1);
   }
 }
 function dropOnDeath(v){
@@ -2308,6 +2324,10 @@ function hudAmmo(){
 }
 let hudMoneyS = "", hudSlotS = "";
 function hudMoney(){
+  if (MODE === "dm"){
+    if (hudMoneyS === "dm") return; hudMoneyS = "dm";
+    $("money").textContent = "NHẶT"; const l = $("moneylab"); l.textContent = "SÚNG TRÊN ĐẤT"; l.classList.remove("buy"); return;
+  }
   const zone = player.alive && inBuyZone(), s = money + "|" + zone;
   if (s === hudMoneyS) return; hudMoneyS = s;
   $("money").textContent = "$" + money; const l = $("moneylab"); l.textContent = zone ? `TIỀN · ${keyName(BIND.buy)}: MUA` : "TIỀN"; l.classList.toggle("buy", zone);
@@ -2334,10 +2354,11 @@ function hudRadar(){
   g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, 150, 150); g.save(); g.beginPath(); g.arc(75, 75, 73, 0, 6.3); g.clip();
   g.translate(75, 75); g.rotate(yaw); g.scale(S, S); g.translate(-player.pos.x, -player.pos.z);
   for (const c of colliders){ if (c.noRay || c.minY > player.pos.y + 2 || c.maxY < player.pos.y + .5) continue; g.fillStyle = c.low ? "rgba(230,225,205,.3)" : "rgba(230,225,205,.75)"; g.fillRect(c.minX, c.minZ, c.maxX - c.minX, c.maxZ - c.minZ); }
+  if (MODE === "dm"){ g.fillStyle = "#ffd86a"; for (const f of floorGuns) g.fillRect(f.pos.x - .8, f.pos.z - .8, 1.6, 1.6); }
   for (const b of bots){ if (!b.alive) continue; if (b.team !== PT && b.shotAgo > 1.5) continue; g.fillStyle = b.team ? "#ff6a55" : "#6fb1ff"; g.beginPath(); g.arc(b.pos.x, b.pos.z, 1.3, 0, 6.3); g.fill(); }
   radarMode(g, S);
   g.restore(); g.fillStyle = "#fff"; g.beginPath(); g.moveTo(75, 68); g.lineTo(80, 80); g.lineTo(75, 77); g.lineTo(70, 80); g.fill();
-  hudMoney(); hudSlots(); hudCtx(); if (buyOpen && !inBuyZone()) closeBuy();
+  hudMoney(); hudSlots(); hudCtx(); if (buyOpen && (MODE === "dm" || !inBuyZone())) closeBuy();
   let zn = ""; for (const z of ZONES) if (player.pos.x >= z[1] && player.pos.x <= z[3] && player.pos.z >= z[2] && player.pos.z <= z[4]){ zn = z[0]; break; } $("zone").textContent = zn;
 }
 
@@ -2349,7 +2370,7 @@ function updatePlayer(dt){
     deathT -= dt; eyeY = lerp(eyeY, player.pos.y + .3, 1 - Math.exp(-dt * 6)); camera.rotation.z = lerp(camera.rotation.z, .5, .06);
     if (MODE !== "dm") $("msg").textContent = "BẠN ĐÃ GỤC — chờ vòng sau";
     else { $("msg").textContent = `BẠN ĐÃ GỤC — hồi sinh sau ${Math.max(0, Math.ceil(deathT))}s`;
-      if (deathT <= 0 && !matchOver){ money = clamp(money + RESPAWN_MONEY, 0, MAX_MONEY); spawnPlayer(); } }
+      if (deathT <= 0 && !matchOver){ spawnPlayer(); } }
     if (!player.alive) camera.rotation.set(clamp(pitch, -1.5, 1.5) * .3, yaw, camera.rotation.z);
     camera.position.set(player.pos.x, eyeY, player.pos.z); return;
   }
@@ -2493,7 +2514,7 @@ const lock = () => { initAudio(); if (actx && actx.state === "suspended") actx.r
     document.documentElement.requestFullscreen().then(() => navigator.keyboard?.lock?.(Object.values(BIND).filter(c => !c.startsWith("Mouse")).concat(["KeyW", "KeyS", "KeyD", "KeyT", "KeyN", "KeyR"])).catch(() => {})).catch(() => {}); };
 // ---------- chọn chế độ / phe / mục tiêu ở màn hình bắt đầu
 const MODE_DESC = {
-  dm: "Hồi sinh liên tục sau 3 giây. Hạ gục +$300, mỗi lần hồi sinh +$1400. Đội đạt đủ số mạng hạ gục trước sẽ thắng.",
+  dm: "Hồi sinh liên tục sau 3 giây. Không mua súng: VK-47, MP-9K, shotgun, SR-338, Đại bàng và lựu đạn nằm sẵn trên map (chấm vàng trên radar). Ô trống thì đi qua là nhặt, ô đã có súng thì bấm E để đổi. Đội đạt đủ số mạng trước sẽ thắng.",
   hostage: "Theo vòng (2:30), chết thì chờ vòng sau. Cảnh sát tới gần con tin ở phía bắc / Grand Hall, bấm E để con tin đi theo rồi dẫn về cổng chính. Khủng bố canh giữ; hết giờ thì Khủng bố thắng vòng.",
   bomb: "Theo vòng (2:30), chết thì chờ vòng sau. Khủng bố mang bom tới điểm A (Khán đài) hoặc B (Vườn hồng), đứng yên giữ E 3 giây để đặt; bom nổ sau 40 giây. Cảnh sát giữ E 6 giây cạnh bom để gỡ. Hết giờ mà chưa đặt bom thì Cảnh sát thắng.",
 };
