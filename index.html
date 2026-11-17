@@ -62,10 +62,13 @@
   .bindrow button:hover{ background:rgba(255,255,255,.2); } .bindrow button.cap{ background:var(--accent); color:#1b1f15; }
   #sensrow{ display:flex; align-items:center; gap:14px; justify-content:center; font-size:13px; margin-bottom:20px; } #sensrow input{ width:240px; }
   #moneylab.buy{ color:var(--accent); opacity:1; }
-  #buymenu{ position:absolute; left:26px; top:36%; display:none; background:rgba(8,12,10,.78); padding:16px 22px; border-left:3px solid var(--accent); font-size:15px; line-height:1.75; min-width:270px; }
+  #buymenu{ position:absolute; left:26px; top:18%; display:none; background:rgba(8,12,10,.78); padding:16px 22px; border-left:3px solid var(--accent); font-size:15px; line-height:1.75; min-width:280px; max-height:70vh; overflow:auto; }
+  #flash{ position:fixed; inset:0; background:#fff; opacity:0; pointer-events:none; z-index:8; }
+  #nv{ position:fixed; inset:0; pointer-events:none; z-index:4; opacity:0; background:rgba(90,170,80,.16); box-shadow:inset 0 0 120px rgba(0,50,0,.45); }
+  #nv.on{ opacity:1; }
   #buymenu h3{ margin:0 0 6px; font-size:15px; color:var(--accent); letter-spacing:.08em; } #buymenu .no{ opacity:.4; } #buymenu b{ color:var(--accent); margin-right:8px; } #buymenu i{ font-style:normal; float:right; margin-left:22px; color:#9be27a; }
-  #scope{ position:absolute; inset:0; display:none; background:radial-gradient(circle at center, rgba(0,0,0,0) 0, rgba(0,0,0,0) 39vh, #000 39.4vh); }
-  #scope::before, #scope::after{ content:""; position:absolute; background:#000; } #scope::before{ left:50%; top:0; bottom:0; width:2px; margin-left:-1px; } #scope::after{ top:50%; left:0; right:0; height:2px; margin-top:-1px; }
+  #scope{ position:absolute; inset:0; display:none; background:radial-gradient(circle at center, rgba(0,0,0,0) 0, rgba(0,0,0,0) 34vh, rgba(0,0,0,.55) 38.6vh, #000 39.4vh); }
+  #scope::before, #scope::after{ content:""; position:absolute; background:rgba(0,0,0,.85); } #scope::before{ left:50%; top:11vh; bottom:11vh; width:1px; } #scope::after{ top:50%; left:calc(50% - 39vh); right:calc(50% - 39vh); height:1px; }
   #scoreboard{ position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); display:none; gap:26px; background:rgba(8,12,10,.82); padding:20px 26px; border-radius:6px; font-size:14px; }
   #scoreboard table{ border-collapse:collapse; min-width:210px; } #scoreboard th{ text-align:left; padding:0 10px 8px 0; letter-spacing:.1em; font-size:12px; }
   #score{ flex-direction:column; gap:2px; padding:6px 20px 5px; }
@@ -123,6 +126,7 @@
   <div id="br"><div><div id="wname"></div><div class="val"><span id="clip">30</span> <span id="res">/ 90</span></div></div></div>
   <div id="vig"></div>
 </div>
+<div id="flash"></div><div id="nv"></div>
 
 <div class="overlay" id="start">
   <div class="panel" style="max-width:620px">
@@ -154,6 +158,8 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
+import { WEAPON_CATALOG, EQUIP } from "./assets/weapons.js";
+import { parseMDL, MDLModel } from "./assets/goldsrc-mdl.js";
 
 /* ============================================================================
    CAMPUS STRIKE — FPS web, toàn bộ hình học / texture / âm thanh là procedural.
@@ -192,9 +198,15 @@ const vmFlashLight = new THREE.PointLight(0xffc070, 0, 2.5); vmScene.add(vmFlash
 
 scene.add(new THREE.HemisphereLight(0xb7d4ee, 0x6a5a48, .55));
 const sun = new THREE.DirectionalLight(0xffe0b8, 2.45);
-sun.position.set(-48, 62, 40); sun.castShadow = true;
+sun.position.set(-86, 112, 72); sun.castShadow = true;
 sun.shadow.mapSize.set(4096, 4096);
-Object.assign(sun.shadow.camera, { left: -62, right: 62, top: 62, bottom: -62, near: 10, far: 220 });
+Object.assign(sun.shadow.camera, { left: -64, right: 64, top: 64, bottom: -64, near: 20, far: 360 });
+const SUN_OFF = sun.position.clone();
+function followSun(x, z){   // khung bóng ±64 m đi theo người chơi, bước 8 m để bóng không rung
+  const sx = Math.round(x / 8) * 8, sz = Math.round(z / 8) * 8;
+  if (sun.target.position.x === sx && sun.target.position.z === sz) return;
+  sun.target.position.set(sx, 0, sz); sun.position.set(sx + SUN_OFF.x, SUN_OFF.y, sz + SUN_OFF.z); sun.target.updateMatrixWorld();
+}
 sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.04;
 scene.add(sun, sun.target);
 const worldFlash = new THREE.PointLight(0xffb060, 0, 14, 1.6); scene.add(worldFlash);
@@ -377,7 +389,11 @@ function hipRoof(x1, z1, x2, z2, y, over = .5, pitch = .32){
 const WALLS = [0xf0e8d6, 0xece2cc, 0xf3eee2, 0xe8dcc2];
 // instanced deco (cửa sổ, cửa ra vào…)
 const INST = { frame: [], pane: [], col: [] };
+// ghost: chạy đủ lượt rng như toà nhà cũ nhưng không dựng gì (giữ chuỗi rng khi bỏ toà nhà); mrng: đổi sang chuỗi riêng cho phần map mở rộng
+let ghost = false, mrng = rng;
+const rngExp = mulberry(31337);
 function inst(kind, axis, a, y, fixed, nrm, off, w, h, t, color){
+  if (ghost) return;
   INST[kind].push(axis === "x" ? [a, y, fixed + nrm * off, w, h, t, color] : [fixed + nrm * off, y, a, t, h, w, color]);
 }
 function faceWindows(axis, a1, a2, fixed, nrm, y0, y1, ground){
@@ -386,7 +402,7 @@ function faceWindows(axis, a1, a2, fixed, nrm, y0, y1, ground){
     const cy = y0 + 1.95 + 3.3 * k; if (cy + 1.1 > y1 - .5) break;
     for (let i = 0; i < n; i++){
       const a = a1 + sp * (i + .5);
-      if (ground && k === 0 && rng() < .2){ // cửa
+      if (ground && k === 0 && mrng() < .2){ // cửa
         inst("frame", axis, a, y0 + 1.25, fixed, nrm, 0, 1.6, 2.5, .12);
         inst("col", axis, a, y0 + 1.15, fixed, nrm, 0, 1.25, 2.3, .16, 0x4a3524);
       } else {
@@ -399,7 +415,11 @@ function faceWindows(axis, a1, a2, fixed, nrm, y0, y1, ground){
   }
 }
 function building(x1, z1, x2, z2, h, o = {}){
-  const y0 = o.y0 || 0, faces = o.faces ?? "nsew", col = o.color || WALLS[rng() * WALLS.length | 0];
+  const y0 = o.y0 || 0, faces = o.faces ?? "nsew", col = o.color || WALLS[mrng() * WALLS.length | 0];
+  if (o.ghost){ ghost = true; const g = y0 === 0;
+    if (faces.includes("n")) faceWindows("x", x1, x2, z1, -1, y0, y0 + h, g); if (faces.includes("s")) faceWindows("x", x1, x2, z2, 1, y0, y0 + h, g);
+    if (faces.includes("w")) faceWindows("z", z1, z2, x1, -1, y0, y0 + h, g); if (faces.includes("e")) faceWindows("z", z1, z2, x2, 1, y0, y0 + h, g);
+    ghost = false; return; }
   solid(x1, z1, x2, z2, y0, y0 + h, stucco(col), { tile: 4 });
   if (y0 === 0) deco(x1 - .06, z1 - .06, x2 + .06, z2 + .06, 0, .8, matStone, { shadow: false });
   deco(x1 - .12, z1 - .12, x2 + .12, z2 + .12, y0 + 3.75, y0 + 3.95, matTrim, { shadow: false });
@@ -422,7 +442,7 @@ const geoLeaf = new THREE.PlaneGeometry(3.7, 2.7); geoLeaf.translate(0, 1.35, 0)
 const canopies = [];
 function tree(x, z, s = 1){
   solid(x - .25, z - .25, x + .25, z + .25, 0, 2.4 * s, null);
-  let yaw = 0, sc = 1; for (let i = 0; i < 24; i++){ const r = rng(); if (i === 0) yaw = r * Math.PI * 2; else if (i === 1) sc = .88 + r * .28; }
+  let yaw = 0, sc = 1; for (let i = 0; i < 24; i++){ const r = mrng(); if (i === 0) yaw = r * Math.PI * 2; else if (i === 1) sc = .88 + r * .28; }
   const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = yaw; g.scale.setScalar(s * sc); scene.add(g);
   const trunk = new THREE.Mesh(geoTrunk, matTrunk); trunk.position.y = 1.35; trunk.castShadow = trunk.receiveShadow = true; g.add(trunk);
   const canopy = new THREE.Group(); canopy.position.y = 2.25; canopy.userData.ph = yaw; canopies.push(canopy); g.add(canopy);
@@ -435,7 +455,8 @@ function tree(x, z, s = 1){
 function plantTufts(){
   const mat = M({ map: texTuft, alphaTest: .35, roughness: 1, side: THREE.DoubleSide });
   const geo = new THREE.PlaneGeometry(.62, .46); geo.translate(0, .23, 0);
-  const zones = [[-12, -6.4, 17, 30, 16], [6.4, 12, 17, 30, 16], [-12, -6.4, 2, 11, 10], [6.4, 12, 2, 11, 10], [-39, -28, -23, -5, 18]];
+  const zones = [[-12, -6.4, 17, 30, 16], [6.4, 12, 17, 30, 16], [-12, -6.4, 2, 11, 10], [6.4, 12, 2, 11, 10], [-39, -28, -23, -5, 18],
+    [-95, -87, -18, 14, 14], [-66, -59, -18, 18, 14], [-53, -49, -18, 18, 8], [53, 61, -17, 17, 14]];
   const spots = [];
   for (const [x1, x2, z1, z2, n] of zones) for (let i = 0; i < n; i++){
     const x = x1 + art() * (x2 - x1), z = z1 + art() * (z2 - z1); if (groundAt(x, z, 1.2) > .12) continue;
@@ -457,6 +478,125 @@ function lamp(x, z, y0 = 0){
 }
 
 // ============================================================================
+// MAP MỞ RỘNG — khu ký túc xá (tây, x -104…-48) và khu thể thao có đường chạy + sân bóng (đông, x 48…112)
+// ============================================================================
+function expandCampus(){
+  mrng = rngExp;
+  const DORM = 0xeee5d2, SPORT = 0xe3e8ea, concrete = M({ map: texStone, color: 0xb8b9b6 }), white = M({ color: 0xf2f2ee, roughness: .8 });
+  plane(-110, -42, -48, 36.5, 0, matPave, 3.2); plane(48, -42, 118, 36.5, 0, matPave, 3.2);
+  // vành đai ngoài mới + bờ hồ kéo dài
+  [[-110, -94, 10], [-94, -78, 12], [-62, -46, 11]].forEach(([a, b, h]) => building(a, -42, b, -36, h, { faces: "ns" }));
+  [[46, 62, 10], [62, 78, 9], [94, 118, 9]].forEach(([a, b, h]) => building(a, -42, b, -36, h, { faces: "ns" }));
+  [[-36, -18, 11], [-18, 0, 9], [0, 18, 10.5], [18, 40, 9]].forEach(([a, b, h]) => building(-110, a, -104, b, h, { faces: "e" }));
+  [[-36, -18, 9.5], [-18, 0, 11], [0, 18, 9], [18, 40, 10]].forEach(([a, b, h]) => building(112, a, 118, b, h, { faces: "w" }));
+  solid(-110, 36, -42, 36.5, 0, 1.05, matStone, { tile: 2 }); solid(42, 36, 118, 36.5, 0, 1.05, matStone, { tile: 2 });
+  solid(-110, 36.5, -42, 38, 0, 40, null, { noRay: true }); solid(42, 36.5, 118, 38, 0, 40, null, { noRay: true });
+  deco(-110, 36.5, -48, 37, -4, 0, matStone, { shadow: false }); deco(48, 36.5, 118, 37, -4, 0, matStone, { shadow: false });
+  // mặt sau của các toà dãy tây / đông còn giữ lại giờ nhìn ra khu mới
+  for (const [a, b, h] of [[-36, -20, 10], [-4, 12, 11], [24, 36, 8.5]]) faceWindows("z", a, b, -48, -1, 0, h, true);
+  for (const [a, b, h] of [[-36, -18, 9], [16, 36, 10.5]]) faceWindows("z", a, b, 48, 1, 0, h, true);
+  // sân thể thao trên bệ: lan can phía đông chừa lối xuống cầu thang mới
+  solid(41.6, -19.6, 42, -13, 2.4, 3.4, matStone, { tile: 2 }); solid(41.6, -9, 42, -2.4, 2.4, 3.4, matStone, { tile: 2 });
+  for (let i = 0; i < 12; i++) solid(47.5 - .5 * i, -13, 48 - .5 * i, -9, 0, .2 * (i + 1), matStone, { tile: 2 });
+
+  // --- KHU KÝ TÚC XÁ: ba khối nhà ở ôm sân trong, sân bóng rổ, hành lang mái che, ki-ốt cà phê, nhà để xe đạp
+  building(-100, -32, -64, -22, 15, { faces: "nse", color: DORM }); building(-100, 20, -64, 30, 15, { faces: "nse", color: DORM });
+  building(-104, -18, -96, 14, 12, { faces: "e", color: 0xe9dcc4 });
+  for (let x = -96; x <= -68; x += 7){ solid(x - .25, -21.6, x + .25, -21.1, 0, 3.6, matTrim); solid(x - .25, 21.1, x + .25, 21.6, 0, 3.6, matTrim); }   // hàng cột hiên tầng trệt
+  deco(-100, -22, -64, -20.8, 3.6, 3.85, matTrim); deco(-100, 20.8, -64, 22, 3.6, 3.85, matTrim);
+  plane(-96, -20.8, -48, 20.8, .02, matGrass, 2.5);
+  const court = M({ map: texCourt, color: 0x4f7ea0 });
+  plane(-86, -9, -68, 7, .035, court, 3);
+  for (const [a, b, c, d] of [[-86, -9, -68, -8.88], [-86, 6.88, -68, 7], [-86, -9, -85.88, 7], [-68.12, -9, -68, 7], [-77.06, -9, -76.94, 7]]) deco(a, b, c, d, .036, .042, white, { shadow: false });
+  { const ring = new THREE.Mesh(new THREE.RingGeometry(1.7, 1.82, 32), white); ring.rotation.x = -Math.PI / 2; ring.position.set(-77, .043, -1); scene.add(ring); }
+  for (const s of [-1, 1]){ const x = -77 + s * 9.9;                                                         // cột rổ, bảng, vành
+    solid(x + s * .2 - .2, -1.2, x + s * .2 + .2, -.8, 0, 3.3, matDark);
+    deco(x - s * .55 - .05, -1.9, x - s * .55 + .05, -.1, 2.7, 3.75, white);
+    const rim = add(new THREE.TorusGeometry(.23, .02, 6, 18), M({ color: 0xe05a1a }), x - s * .85, 3.05, -1, false); rim.rotation.x = Math.PI / 2; }
+  hedge(-84, -15.5, -72, -14.9); hedge(-84, 12.9, -72, 13.5);
+  for (let z = -20; z <= 18; z += 4) for (const x of [-58, -54]) solid(x - .15, z - .15, x + .15, z + .15, 0, 3.2, matTrim);   // hành lang mái che
+  deco(-58.6, -20.5, -53.4, 18.5, 3.2, 3.42, matWood, { tile: 1.5 });
+  building(-64, -12, -59, -6, 3.4, { faces: "nsew", color: 0xf1d3a0 });
+  for (const [x, z] of [[-67, -3], [-67, 2]]){ solid(x - .4, z - .4, x + .4, z + .4, 0, .76, matTrim); add(new THREE.CylinderGeometry(.03, .03, 2.4, 5), matDark, x, 1.2, z); add(new THREE.ConeGeometry(1.4, .5, 8), M({ color: 0x2f6f9e, side: THREE.DoubleSide }), x, 2.5, z); }
+  solid(-93, 15.2, -80, 15.6, 0, 1.2, matDark); deco(-93, 15, -80, 17.6, 2.4, 2.55, matRoof);
+  for (const x of [-92.6, -80.4]) solid(x - .1, 17.2, x + .1, 17.4, 0, 2.4, matDark);
+  crate(-70, -20.5, -68.8, -19.3, 1.2); crate(-52, -6, -50.8, -4.8, 1.2); crate(-94, 2, -92.8, 3.2, 1.2); crate(-60, 30.4, -58.6, 31.8, 1.3);
+  planter(-64, -17); planter(-64, 15);
+  for (const [x, z, k] of [[-91, -13, .9], [-91, 10, .9], [-62, -17.8, .8], [-52, -30, .9], [-52, 30, .9], [-88, 31.6, .8]]) tree(x, z, k);
+  lamp(-60, -20); lamp(-60, 18); lamp(-88, -2); lamp(-50, 0);
+
+  // --- KHU THỂ THAO: đường chạy quanh sân bóng, khán đài có mái, nhà thi đấu, phòng gym, đèn pha
+  const track = M({ color: 0xb4553e, roughness: .95 }), cx = 82, hz = 15, r0 = 15, r1 = 19;
+  plane(cx - r1, -hz, cx - r0, hz, .03, track, 2); plane(cx + r0, -hz, cx + r1, hz, .03, track, 2);
+  plane(cx - r0, -hz, cx + r0, hz, .028, matGrass, 2.5);
+  for (const s of [-1, 1]){ const th = s < 0 ? 0 : Math.PI;
+    const ring = new THREE.Mesh(new THREE.RingGeometry(r0, r1, 40, 1, th, Math.PI), track); ring.rotation.x = -Math.PI / 2; ring.position.set(cx, .03, s * hz); ring.receiveShadow = true; scene.add(ring);
+    const sh = new THREE.Shape(); sh.absarc(0, 0, r0 / 2.5, th, th + Math.PI, false); const cap = new THREE.Mesh(new THREE.ShapeGeometry(sh, 24), matGrass);
+    cap.scale.setScalar(2.5); cap.rotation.x = -Math.PI / 2; cap.position.set(cx, .028, s * hz); cap.receiveShadow = true; scene.add(cap); }
+  for (let i = 1; i < 4; i++){ const r = r0 + i; deco(cx - r - .03, -hz, cx - r + .03, hz, .031, .036, white, { shadow: false }); deco(cx + r - .03, -hz, cx + r + .03, hz, .031, .036, white, { shadow: false }); }
+  for (const [a, b, c, d] of [[69, -24, 69.12, 24], [94.88, -24, 95, 24], [69, -24, 95, -23.88], [69, 23.88, 95, 24], [69, -.06, 95, .06]]) deco(a, b, c, d, .031, .038, white, { shadow: false });
+  { const ring = new THREE.Mesh(new THREE.RingGeometry(4.3, 4.44, 40), white); ring.rotation.x = -Math.PI / 2; ring.position.set(cx, .039, 0); scene.add(ring); }
+  const net = M({ color: 0xffffff, transparent: true, opacity: .28, side: THREE.DoubleSide, depthWrite: false });
+  for (const s of [-1, 1]){ const z = s * 24;                                                                // khung thành
+    for (const x of [78.3, 85.7]) solid(x - .06, z - .06, x + .06, z + .06, 0, 2.44, white);
+    deco(78.24, z - .06, 85.76, z + .06, 2.38, 2.5, white); deco(78.3, z + s * 1.6 - .02, 85.7, z + s * 1.6 + .02, 0, 2.3, net, { shadow: false }); }
+  for (const s of [-1, 1]){ const z0 = s * 4;                                                                // ca-bin dự bị (chỗ nấp cạnh sân)
+    solid(56.5, -6, 56.9, 6, 0, 2.4, concrete); solid(56.5, s < 0 ? -6 : 5.7, 59.6, s < 0 ? -5.7 : 6, 0, 2.4, concrete);
+    deco(56.4, -6.2, 59.9, 6.2, 2.4, 2.56, M({ color: 0x2f5f8e, transparent: true, opacity: .75 })); solid(57, z0 - 1.4, 57.6, z0 + 1.4, 0, .48, matWood, { tile: 1 }); }
+  // khán đài: 10 bậc cao 0,3 m (đi bộ lên được), tường sau, mái đua
+  const seat = [M({ color: 0x2f62a8, roughness: .6 }), M({ color: 0xc8302e, roughness: .6 })];
+  for (let i = 0; i < 10; i++){ const x = 101.5 + .9 * i, y = .3 * (i + 1); solid(x, -16, 111, 16, 0, y, concrete, { tile: 2 });
+    if (i % 2) deco(x + .1, -15.4, x + .4, 15.4, y, y + .32, seat[i >> 1 & 1], { shadow: false }); }
+  solid(111, -16.5, 112, 16.5, 0, 7.6, concrete, { tile: 2 }); deco(100.6, -16.8, 112.2, 16.8, 7.6, 7.85, M({ color: 0xd9dee2, roughness: .5, metalness: .3 }));
+  for (const z of [-16.3, 16.3]) solid(101.5, z - .2, 111, z + .2, 0, 3.4, concrete, { tile: 2 });
+  building(52, -32, 66, -22, 10, { faces: "se", color: SPORT }); building(52, 22, 66, 32, 8, { faces: "ne", color: SPORT });
+  plane(52, -18, 62, 18, .02, matGrass, 2.5);
+  for (const [x, z] of [[62, -33], [102, -33], [62, 33], [102, 33]]){                                         // cột đèn pha
+    solid(x - .3, z - .3, x + .3, z + .3, 0, 16, null); add(new THREE.CylinderGeometry(.16, .26, 16, 8), matDark, x, 8, z);
+    add(new THREE.BoxGeometry(2.4, 1.2, .4), M({ color: 0xfafae8, emissive: 0xfff4c0, emissiveIntensity: .8 }), x, 16.2, z).lookAt(cx, 0, 0); }
+  crate(70, -33, 71.4, -31.6, 1.2); crate(94, 31.6, 95.4, 33, 1.2); crate(58.6, -14, 59.8, -12.8, 1.2); crate(58.6, 12.8, 59.8, 14, 1.2); crate(100, -26, 101.4, -24.6, 1.2);
+  for (const [x, z, k] of [[53, -8, .85], [53, 8, .85], [70, 33, .8], [94, -33.5, .8], [108, 26, .85], [108, -26, .85]]) tree(x, z, k);
+  lamp(50, -2); lamp(50, 18); lamp(100, -20); lamp(100, 20);
+
+  // --- KHU HỌC THUẬT PHÍA BẮC (z -116…-42): đại lộ, thư viện, hai giảng đường, bãi đỗ xe, khu thí nghiệm, quảng trường xuất phát của đội Đỏ
+  plane(-110, -116, 118, -42, 0, matPave, 3.2);
+  for (const [a, b, h] of [[-46, -30, 9], [-16, -2, 8.5], [-2, 12, 10.5], [26, 46, 11]]) faceWindows("x", a, b, -42, -1, 0, h, true);
+  [[-110, -86, 11], [-86, -60, 9], [-60, -36, 12], [-36, -12, 10], [-12, 12, 13], [12, 36, 10], [36, 60, 12], [60, 86, 9], [86, 118, 11]].forEach(([a, b, h]) => building(a, -122, b, -116, h, { faces: "s" }));
+  [[-116, -96, 10], [-96, -78, 12], [-78, -60, 9], [-60, -42, 11]].forEach(([a, b, h]) => { building(-110, a, -104, b, h, { faces: "e" }); building(112, a, 118, b, h, { faces: "w" }); });
+  plane(-110, -52, 118, -48, .03, matPlaza, 4);                                                               // đại lộ
+  for (const x of [-96, -80, -60, -45, -32, -12, 0, 12, 30, 42, 58, 74, 98, 108]) tree(x, -43.6, .85);
+  for (const x of [-62, -34, 0, 34, 62]) tree(x, -54, .9);
+  planter(-16, -56); planter(16, -56); bench(-40, -50.4, -37, -49.9); bench(37, -50.4, 40, -49.9); bench(-4, -57, -1, -56.5); bench(1, -57, 4, -56.5);
+  for (const x of [-86, -54, -23, 6, 34, 66, 96]) lamp(x, -50);
+  // bãi đỗ xe (tây): 3 hàng xe, chừa lối đi ở x -96 / -86 / -76
+  plane(-104, -98, -70, -54, .025, M({ color: 0x55585c, roughness: .9 }), 4);
+  for (const z of [-58, -70, -82, -94]) deco(-104, z - .06, -70, z + .06, .026, .032, white, { shadow: false });
+  const carCols = [0xb8bcc2, 0x2a4f7a, 0x8c1f22, 0xe8e6e0, 0x2c2e31, 0x4b6b45];
+  for (const z of [-64, -76, -88]) [-102.5, -99.3, -92.7, -89.5, -82.5, -79.3, -72.7].forEach((x, i) => { if ((i + z) % 5 === 0) return;
+    const c = M({ color: carCols[(i * 3 + -z) % carCols.length], roughness: .35, metalness: .5 });
+    solid(x - .9, z - 2.2, x + .9, z + 2.2, .25, 1.0, c, { tile: 2 }); solid(x - .8, z - 1.2, x + .8, z + 1, 1.0, 1.45, M({ color: 0x1e2830, roughness: .1, metalness: .6 }));
+    for (const dz of [-1.4, 1.4]) for (const dx of [-.85, .85]) add(new THREE.CylinderGeometry(.33, .33, .22, 10), matDark, x + dx, .33, z + dz).rotation.z = Math.PI / 2; });
+  // giảng đường tây / đông + thư viện có hàng cột
+  building(-60, -82, -34, -66, 11, { faces: "nsew", color: 0xeadfca }); building(34, -82, 60, -66, 11, { faces: "nsew", color: 0xeadfca });
+  building(-16, -84, 16, -66, 14, { faces: "nsew", color: 0xf2ead8 });
+  for (let x = -12; x <= 12; x += 4){ solid(x - .3, -65.3, x + .3, -64.7, 0, 6, null); add(new THREE.CylinderGeometry(.27, .32, 6, 12), matTrim, x, 3, -65); }
+  deco(-13, -66, 13, -63.8, 6, 6.45, matTrim);
+  for (const s of [-1, 1]){ hedge(s * 33 - 2, -78, s * 33 + 2, -77.4); hedge(s * 19 - 2, -78, s * 19 + 2, -77.4); crate(s * 29 - .7, -67.4, s * 29 + .7, -66, 1.2); }
+  // quảng trường xuất phát phía bắc: cột cờ, bồn cây thấp làm chỗ nấp
+  plane(-30, -114, 30, -92, .03, matPlaza, 4);
+  for (const x of [-6, 0, 6]){ solid(x - .1, -112.1, x + .1, -111.9, 0, 9, null); add(new THREE.CylinderGeometry(.06, .08, 9, 6), matTrim, x, 4.5, -112); }
+  for (const [a, b, c, d] of [[-29, -96, -23, -95.4], [23, -96, 29, -95.4], [-3, -95, 3, -94.4], [-16, -105, -10, -104.4], [10, -105, 16, -104.4]]) solid(a, b, c, d, 0, .9, matStone, { tile: 1.5 });
+  for (const x of [-34, 34]) planter(x, -95);
+  // khu thí nghiệm + bãi container (đông)
+  building(74, -100, 106, -86, 13, { faces: "nsw", color: 0xe0e4e6 });
+  for (const [x1, z1, x2, z2, y0, c] of [[84, -66.2, 90, -63.8, 0, 0x2f6a8e], [98, -78, 100.4, -72, 0, 0xb2492d], [90, -76.2, 96, -73.8, 0, 0x3d7048], [90, -76.2, 96, -73.8, 2.6, 0xc59a2c], [102, -64.2, 108, -61.8, 0, 0xb2492d]])
+    solid(x1, z1, x2, z2, y0, y0 + 2.6, M({ color: c, roughness: .6, metalness: .4 }));
+  crate(76, -80, 77.4, -78.6, 1.2); crate(104, -82, 105.4, -80.6, 1.2); crate(80, -112, 81.4, -110.6, 1.3);
+  for (const [x, z] of [[-90, -104], [-50, -108], [50, -108], [110, -110]]) tree(x, z, .85);
+  mrng = rng;
+}
+
+// ============================================================================
 // MAP — khuôn viên. x: tây→đông, z: bắc(-)→nam(+). Bố cục tự thiết kế.
 // ============================================================================
 plane(-48, -42, 48, 36.5, 0, matPave, 3.2);
@@ -467,9 +607,10 @@ plane(-3, -1, 3, 33, .035, matPlaza, 4); plane(-42, 12.6, 42, 15.4, .04, matPlaz
 add(new THREE.CylinderGeometry(5.2, 5.2, .02, 40), matPlaza, 0, .06, 14, false);
 for (const sx of [-1, 1]){ const d = add(new THREE.PlaneGeometry(2.4, 30), matPlaza, sx * 14, .05, 23.5, false); d.rotation.x = -Math.PI / 2; d.rotation.z = sx * .75; add(new THREE.CylinderGeometry(3, 3, .02, 28), matPlaza, sx * 24, .06, 31.5, false); }
 // vành đai
-[[-46, -30, 9], [-30, -16, 11], [-16, -2, 8.5], [-2, 12, 10.5], [12, 26, 9], [26, 46, 11]].forEach(([a, b, h]) => building(a, -42, b, -36, h, { faces: "s" }));
-[[-36, -20, 10], [-20, -4, 8.5], [-4, 12, 11], [12, 24, 9], [24, 40, 8.5]].forEach(([a, b, h]) => building(-48, a, -42, b, h, { faces: "e" }));
-[[-36, -18, 9], [-18, 0, 11], [0, 16, 9.5], [16, 40, 10.5]].forEach(([a, b, h]) => building(42, a, 48, b, h, { faces: "w" }));
+[[-46, -30, 9], [-30, -16, 11, 1], [-16, -2, 8.5], [-2, 12, 10.5], [12, 26, 9, 1], [26, 46, 11]].forEach(([a, b, h, open]) => building(a, -42, b, -36, h, { faces: "s", ghost: !!open }));   // hai lối lên khu học thuật phía bắc
+// dãy tây / đông có lối mở sang khu ký túc xá (tây) và sân vận động (đông); đoạn bỏ đi vẫn tiêu rng để phần còn lại không đổi
+[[-36, -20, 10], [-20, -4, 8.5, 1], [-4, 12, 11], [12, 24, 9, 1], [24, 40, 8.5]].forEach(([a, b, h, open]) => building(-48, a, -42, b, h, { faces: "e", ghost: !!open }));
+[[-36, -18, 9], [-18, 0, 11, 1], [0, 16, 9.5, 1], [16, 40, 10.5]].forEach(([a, b, h, open]) => building(42, a, 48, b, h, { faces: "w", ghost: !!open }));
 // bờ hồ phía nam
 solid(-42, 36, 42, 36.5, 0, 1.05, matStone, { tile: 2 });
 solid(-42, 36.5, 42, 38, 0, 40, null, { noRay: true });
@@ -481,7 +622,7 @@ for (let i = 0; i < 30; i++){ const x = -300 + i * 21 + rng() * 4, z = 165 + rng
   if (i % 3 === 0) add(new THREE.IcosahedronGeometry(6 + rng() * 3, 0), matLeaf, x + 10, 4, z - 12, false); }
 // nhà cao tầng xa xa (khu đô thị)
 for (let i = 0; i < 16; i++){ const x = -260 + i * 34 + rng() * 14, h = 40 + rng() * 60;
-  add(boxGeo(14, h, 14, 6), matFacade, x, h / 2, -150 - rng() * 60, false); }
+  add(boxGeo(14, h, 14, 6), matFacade, x, h / 2, -215 - rng() * 60, false); }
 
 // --- TÒA CHÍNH hình chữ U ôm quảng trường: khối giữa A có tháp nhọn + lối Grand Hall xuyên qua, hai cánh B/C, hai dãy D/E
 const CA = 0xf1e9d6;
@@ -544,7 +685,7 @@ plane(30.4, -19.6, 41.6, -2.4, 2.42, M({ map: texCourt, color: 0xd9624e }), 3); 
 for (let i = 0; i < 12; i++){ solid(33, -26 + .5 * i, 37, -25.5 + .5 * i, 0, .2 * (i + 1), matStone, { tile: 2 }); solid(33, 3.5 - .5 * i, 37, 4 - .5 * i, 0, .2 * (i + 1), matStone, { tile: 2 }); }
 const par = (a, b, c2, d) => solid(a, b, c2, d, 2.4, 3.4, matStone, { tile: 2 });
 par(30, -20, 30.4, -2); par(30.4, -20, 33, -19.6); par(37, -20, 42, -19.6); par(30.4, -2.4, 33, -2); par(37, -2.4, 42, -2);
-crate(39.6, -12, 41, -10.6, 1.2, 2.4); planter(40.8, -17.5, 2.4); planter(40.8, -4.5, 2.4);
+crate(39.6, -16.4, 41, -15, 1.2, 2.4); planter(40.8, -17.5, 2.4); planter(40.8, -4.5, 2.4);
 for (const z of [-17.6, -4.4]){ add(new THREE.CylinderGeometry(.07, .07, 3.2, 6), matDark, 36.2, 4, z); add(new THREE.BoxGeometry(1.5, 1, .06), M({ color: 0xffffff }), 36.2, 5.3, z + (z < -10 ? .25 : -.25)); }
 // sân sau đông bắc + đường bắc
 tree(28, -33.5, .85); tree(39, -30); crate(26, -27.4, 27.4, -26, 1.2); solid(38, -25, 40.4, -23.8, 0, 1.3, M({ color: 0x3f6d8f, roughness: .5, metalness: .3 }));
@@ -564,6 +705,7 @@ for (const sx of [-1, 1]){ solid(sx * 6 - 1, 33, sx * 6 + 1, 35, 0, 5.2, stucco(
   solid(sx * 15 - 8, 35.4, sx * 15 + 8, 35.9, 0, 1.6, stucco(CA), { tile: 3 }); }
 bench(-2.5, 34.9, -1, 35.4); bench(1, 34.9, 2.5, 35.4); crate(-12.5, 29, -11.1, 30.4, 1.2); crate(11.1, 29, 12.5, 30.4, 1.2);
 for (const x of [-30, -14, 14, 30]) lamp(x, 35.3); for (const z of [3, 22]){ lamp(-3.6, z); lamp(3.6, z); }
+expandCampus();
 
 // build instanced windows/doors
 { const unit = new THREE.BoxGeometry(1, 1, 1), mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), col = new THREE.Color();
@@ -592,7 +734,10 @@ plantTufts();
 }
 const ZONES = [["Grand Hall", -3, -29, 3, -15.5], ["Quảng trường trung tâm", -16, -17, 16, -1], ["Căn-tin", -24, -12, -16, -4], ["Cổng vòm dãy E", 16, -10, 24, -7], ["Sân thể thao", 30, -26, 42, 4],
   ["Đường Bắc", -42, -36, 42, -29], ["Vườn tây", -42, -29, -24, -1], ["Lối Đông", 24, -29, 30, -1], ["Khán đài ngoài trời", -28, 0, -16, 10.5], ["Vườn hồng", 17, 2, 27, 12],
-  ["Cổng chính", -10, 28, 10, 36], ["Trục chính", -6, -1, 6, 28], ["Công viên tây", -42, -1, -6, 36], ["Công viên đông", 6, -1, 42, 36]];
+  ["Cổng chính", -10, 28, 10, 36], ["Trục chính", -6, -1, 6, 28], ["Công viên tây", -42, -1, -6, 36], ["Công viên đông", 6, -1, 42, 36],
+  ["Thư viện", -17, -86, 17, -62], ["Giảng đường tây", -62, -86, -32, -62], ["Giảng đường đông", 32, -86, 62, -62], ["Bãi đỗ xe", -104, -100, -70, -54],
+  ["Khu thí nghiệm", 70, -116, 112, -52], ["Quảng trường phía bắc", -36, -116, 36, -90], ["Đại lộ bắc", -110, -54, 118, -36], ["Khu học thuật phía bắc", -110, -116, 118, -36],
+  ["Sân bóng rổ", -87, -10, -67, 8], ["Khu ký túc xá", -110, -36, -42, 36], ["Khán đài sân vận động", 100, -17, 112, 17], ["Sân vận động", 42, -36, 118, 36]];
 
 // ============================================================================
 // VA CHẠM / RAY
@@ -632,7 +777,17 @@ function rayBoxes(ox, oy, oz, dx, dy, dz, maxT){
   if (dy < -1e-6){ const tg = -oy / dy; if (tg > 0 && tg < best){ best = tg; found = true; _hit.nx = 0; _hit.ny = 1; _hit.nz = 0; } }
   _hit.t = best; return found ? _hit : null;
 }
-function los(a, b){ const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z, d = Math.hypot(dx, dy, dz); return !rayBoxes(a.x, a.y, a.z, dx / d, dy / d, dz / d, d - .05); }
+const smokes = [];
+function smokeBlocks(a, b){
+  const abx = b.x - a.x, aby = b.y - a.y, abz = b.z - a.z, den = abx * abx + aby * aby + abz * abz || 1;
+  for (const s of smokes){
+    const t = clamp(((s.p.x - a.x) * abx + (s.p.y + 1 - a.y) * aby + (s.p.z - a.z) * abz) / den, 0, 1);
+    const px = a.x + abx * t, py = a.y + aby * t, pz = a.z + abz * t;
+    if ((px - s.p.x) ** 2 + (py - (s.p.y + 1)) ** 2 + (pz - s.p.z) ** 2 < s.r * s.r) return true;
+  }
+  return false;
+}
+function los(a, b){ if (smokeBlocks(a, b)) return false; const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z, d = Math.hypot(dx, dy, dz); return !rayBoxes(a.x, a.y, a.z, dx / d, dy / d, dz / d, d - .05); }
 
 // ============================================================================
 // NAV GRAPH — node đặt tay, cạnh tự sinh bằng mô phỏng đi bộ
@@ -644,7 +799,25 @@ const NAV = [[-36, -33], [-24, -32.5], [-12, -32.5], [0, -32], [12, -32.5], [24,
   [-33, -25], [-27, -18], [-37, -18], [-32, -11], [-28, -3], [-38, -3],
   [27, -25], [35, -27.5], [27, -15], [27, -3], [35, -18.5, 2.4], [38.5, -15, 2.4], [35, -3.5, 2.4], [35, 5.5],
   [0, 3], [0, 9], [3.6, 14], [-3.6, 14], [0, 20], [0, 28], [-8, 31.5], [8, 31.5],
-  [-12, 2], [12, 2], [-14, 10], [14, 14], [-30, 0.5], [30, 14], [-30, 12], [-12, 14], [22, 7], [-22, 14], [-20, 21], [20, 22], [-34, 31.5], [34, 31.5], [-24, 31.5], [24, 31.5], [-37, 21], [37, 22], [-22, 5, .75]];
+  [-12, 2], [12, 2], [-14, 10], [14, 14], [-30, 0.5], [30, 14], [-30, 12], [-12, 14], [22, 7], [-22, 14], [-20, 21], [20, 22], [-34, 31.5], [34, 31.5], [-24, 31.5], [24, 31.5], [-37, 21], [37, 22], [-22, 5, .75],
+  // khu ký túc xá
+  [-45, -12], [-45, 18], [-51, -12], [-51, 2], [-51, 18], [-52, -27], [-56, -19], [-56, -1], [-56, 17], [-52, 33], [-58, -34], [-80, -34], [-102, -34],
+  [-102, -26], [-102, -20], [-90, -19.5], [-90, -2], [-90, 18.7], [-70, -34], [-90, -34], [-77, -12], [-77, -1], [-77, 10], [-67, -16], [-66, -9], [-67, 14], [-76, 17.5],
+  [-102, 17], [-102, 25], [-102, 33], [-80, 33], [-66, 33],
+  // khu thể thao
+  [40, -11, 2.4], [50, -11], [45, 8], [50, -27], [58, -34], [74, -34], [90, -34], [52, -16], [52, 0], [52, 16], [58, -19], [58, 19], [62, 0],
+  [65, -20], [65, 20], [82, -31], [82, 31], [75, 0], [89, 0], [82, -12], [82, 12], [82, -21], [82, 21], [99, -20], [99, 0], [99, 20],
+  [104, -20], [104, 20], [106, 0, 1.8], [109.8, -8, 3], [109.8, 8, 3], [108, -30], [108, 30], [90, 33], [72, 33],
+  // khu học thuật phía bắc: lối xuyên dãy nhà bắc, đại lộ, quanh thư viện / giảng đường, bãi xe, khu thí nghiệm, quảng trường xuất phát
+  [-70, -39], [-25, -39], [19, -39], [86, -39],
+  [-100, -46], [-86, -46], [-70, -46], [-54, -46], [-38, -46], [-23, -46], [-8, -46], [6, -46], [19, -46], [34, -46], [50, -46], [66, -46], [80, -46], [96, -46], [108, -46],
+  [-66, -62], [-54, -62], [-40, -62], [-25, -62], [-8, -62], [8, -62], [25, -62], [40, -62], [54, -62], [66, -62],
+  [-66, -74], [-25, -74], [25, -74], [66, -74],
+  [-66, -88], [-54, -88], [-40, -88], [-25, -88], [-8, -89], [8, -89], [25, -88], [40, -88], [54, -88], [66, -88],
+  [-96, -58], [-86, -58], [-76, -58], [-96, -70], [-86, -70], [-76, -70], [-96, -82], [-86, -82], [-76, -82], [-96, -94], [-86, -94], [-76, -94],
+  [-96, -106], [-80, -106], [-66, -100], [-50, -100], [-36, -100], [-20, -100], [0, -100], [20, -100], [36, -100], [50, -100], [70, -100],
+  [-20, -110], [0, -110], [20, -110], [70, -108], [86, -108], [102, -108], [109, -96], [109, -84],
+  [80, -58], [96, -58], [108, -58], [80, -70], [96, -70], [108, -70], [80, -82], [100, -82]];
 const nodes = NAV.map(([x, z, y]) => ({ x, z, y: groundAt(x, z, (y || 0) + .3), links: [] }));
 { const e = { pos: new V3(), radius: .4, height: 1.75, vy: 0, onGround: true };
   const walk = (a, b) => {
@@ -678,10 +851,15 @@ function nearestNode(p){
 }
 
 // ============================================================================
-// ÂM THANH — file wav trong Material/Counter-Strike 1.6, thiếu file thì tổng hợp
+// ÂM THANH — wav gốc CS 1.6 tải từ GoldSrc vào goldsrc/sound (python goldsrc/fetch.py), thiếu file thì tổng hợp
 // ============================================================================
-const SNDROOT = "Material/Counter-Strike%201.6/cstrike/sound/";
+const SNDROOT = "goldsrc/sound/";
+const FIRE_SND = { glock: ["glock18-1", "glock18-2"], usp: ["usp_unsil-1"], p228: ["p228-1"], deagle: ["deagle-1", "deagle-2"], elite: ["elite_fire"],
+  fiveseven: ["fiveseven-1"], m3: ["m3-1"], xm1014: ["xm1014-1"], mac10: ["mac10-1"], tmp: ["tmp-1", "tmp-2"], mp5: ["mp5-1", "mp5-2"], ump45: ["ump45-1"],
+  p90: ["p90-1"], galil: ["galil-1", "galil-2"], famas: ["famas-1", "famas-2"], ak47: ["ak47-1", "ak47-2"], scout: ["scout_fire-1"],
+  m4a1: ["m4a1_unsil-1", "m4a1_unsil-2"], sg552: ["sg552-1", "sg552-2"], aug: ["aug-1"], awp: ["awp1"], sg550: ["sg550-1"], g3sg1: ["g3sg1-1"], m249: ["m249-1", "m249-2"] };
 const SNDFILES = {
+  ...Object.fromEntries(Object.entries(FIRE_SND).map(([k, v]) => ["fire_" + k, v.map(f => `weapons/${f}.wav`)])),
   rifle: ["weapons/ak47-1.wav", "weapons/ak47-2.wav"], pistol: ["weapons/glock18-1.wav", "weapons/glock18-2.wav"],
   smg: ["weapons/mp5-1.wav", "weapons/mp5-2.wav"], deagle: ["weapons/deagle-1.wav", "weapons/deagle-2.wav"],
   shotgun: ["weapons/m3-1.wav"], sniper: ["weapons/awp1.wav"],
@@ -714,17 +892,30 @@ function decodeSamples(){
 }
 function playAt(key, index, vol, pan = 0, pitch = 1, tail = .08){
   const list = clips[key]; if (!actx || !list || !list.length) return false;
-  const src = actx.createBufferSource(); src.buffer = list[((index % list.length) + list.length) % list.length]; src.playbackRate.value = pitch;
+  const src = actx.createBufferSource(); src.buffer = list[((Math.floor(index) % list.length) + list.length) % list.length]; src.playbackRate.value = pitch;
   const g = actx.createGain(); g.gain.value = vol; const pn = actx.createStereoPanner(); pn.pan.value = clamp(pan, -1, 1);
   src.connect(g); g.connect(pn); pn.connect(master);
   if (reverb && tail > 0){ const send = actx.createGain(); send.gain.value = tail; pn.connect(send); send.connect(reverb); }
   src.start(); return true;
 }
 const playRand = (key, vol, pan, pitch, tail) => playAt(key, Math.random() * ((clips[key] || []).length), vol, pan, pitch, tail);
+// tiếng theo đường dẫn (sự kiện 5004 trong hoạt cảnh model GoldSrc, vd "weapons/ak47_clipout.wav") — nạp khi cần
+const pathClips = new Map();
+function preloadPath(path){
+  const k = path.toLowerCase().replace(/\\/g, "/");
+  if (!pathClips.has(k)) pathClips.set(k, { raw: fetch(SNDROOT + k).then(r => r.ok ? r.arrayBuffer() : null).catch(() => null), buf: null, dec: null });
+  const e = pathClips.get(k);
+  if (actx && !e.dec) e.dec = e.raw.then(b => b && actx.decodeAudioData(b.slice(0))).then(d => { e.buf = d; }).catch(() => {});
+  return e;
+}
+function playPath(path, vol = .6){
+  if (!actx) return; const e = preloadPath(path); if (!e.buf) return;
+  const src = actx.createBufferSource(); src.buffer = e.buf; const g = actx.createGain(); g.gain.value = vol; src.connect(g); g.connect(master); src.start();
+}
 function initAudio(){
   if (actx) return; try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch { return; }
   master = actx.createGain(); master.gain.value = .5; const comp = actx.createDynamicsCompressor(); comp.threshold.value = -10; comp.knee.value = 12; comp.ratio.value = 3; master.connect(comp); comp.connect(actx.destination);
-  decodeSamples();
+  decodeSamples(); for (const k of pathClips.keys()) preloadPath(k);
   noiseBuf = actx.createBuffer(1, actx.sampleRate, actx.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
   // vang ngoài trời: đáp ứng xung tự sinh (nhiễu tắt dần + vài tiếng dội sớm từ tường nhà)
   const sr = actx.sampleRate, len = sr * 1.6 | 0, ir = actx.createBuffer(2, len, sr);
@@ -772,7 +963,8 @@ function tone(dur, vol, f0, f1, out, type = "sine", when = 0){
 }
 function outAt(vol, pan){ const g = actx.createGain(); g.gain.value = vol; const p = actx.createStereoPanner(); p.pan.value = clamp(pan, -1, 1); g.connect(p); p.connect(master); return g; }
 const sfx = {
-  shot(kind, vol = 1, pan = 0){ if (!actx) return; const far = vol < .55; if (!playRand(kind, vol * .85, pan, .98 + Math.random() * .04, far ? .32 : .1)) gunshot(kind, vol, pan); },
+  shot(kind, vol = 1, pan = 0, id){ if (!actx) return; const far = vol < .55, pt = .98 + Math.random() * .04, tail = far ? .32 : .1;
+    if (!(id && playRand("fire_" + id, vol * .85, pan, pt, tail)) && !playRand(kind, vol * .85, pan, pt, tail)) gunshot(kind, vol, pan); },
   click(when = 0, vol = .35){ if (!actx) return; noise(.028, vol * 1.2, "bandpass", 3200, 1700, master, when); noise(.07, vol * .6, "lowpass", 900, 250, master, when + .004); tone(.06, vol * .22, 2150, 2050, master, "triangle", when); tone(.045, vol * .16, 3380, 3300, master, "triangle", when + .002); },
   mech(kind, step){ if (!actx) return; const key = kind === "shotgun" ? "shell" : kind + "Mech"; if (!playAt(key, step, .62, 0, 1, .03)) sfx.click(0, .4); },
   pump(){ if (!actx) return; if (!playRand("pump", .55, 0, 1, .03)) sfx.click(0, .5); },
@@ -1183,6 +1375,335 @@ function buildRifle(lod){
   P.muzzle = new V3(0, .04, -.68); P.eject = new V3(.035, .06, -.07); P.gripR = new V3(0, -.055, .02); P.gripL = new V3(0, .0, -.3); P.sightY = .1085; P.hand = "fore";
   g.userData = P; return g;
 }
+// ---- M4A1 (họ AR-15): quai xách có thước ngắm lỗ tròn, ốp tay tròn có gân, báng rút, đầu ruồi chữ A, loa che lửa lồng chim
+const M4P = {
+  upper: [[-.075, .026], [.19, .026], [.19, .074], [-.075, .074]],
+  lower: [[-.07, .026], [.165, .026], [.165, .002], [.15, -.006], [.148, -.048], [.074, -.048], [.072, -.008], [-.05, -.008], [-.07, .004]],
+  grip: spline([[.024, -.006], [.012, -.03], [.0, -.07], [-.008, -.104], [-.03, -.112], [-.046, -.104], [-.038, -.07], [-.028, -.03], [-.026, -.006]], 3),
+  guard: [[.016, -.046], [.074, -.046], [.074, -.038], [.026, -.038], [.022, -.008], [.014, -.008]],
+  handle: [[-.072, .074], [.124, .074], [.112, .1], [-.055, .1], [-.072, .094]], handleHole: [[-.02, .081], [.085, .081], [.08, .093], [-.015, .093]],
+  stock: [[-.165, .064], [-.285, .07], [-.29, -.045], [-.268, -.05], [-.22, -.01], [-.165, .028]],
+  mag: spline([[.078, -.044], [.08, -.1], [.088, -.15], [.098, -.178], [.142, -.168], [.134, -.14], [.13, -.1], [.128, -.044]], 3),
+  fsb: [[.405, .03], [.44, .03], [.44, .058], [.432, .104], [.414, .104], [.405, .058]], fsbHole: [[.415, .064], [.43, .064], [.426, .094], [.419, .094]],
+};
+let m4Mat = null;
+function m4Mats(){
+  if (m4Mat) return m4Mat;
+  const tex = gunTexture(-.3, .68, -.2, .14, g => {
+    g.fillStyle = "#2f3135"; g.fillRect(-1, -1, 2, 2); PNT.brushed(g, -.3, -.2, .68, .14, 1600, .07);
+    for (const k of ["upper", "lower"]){ PNT.poly(g, M4P[k], "#34373c"); PNT.shade(g, M4P[k], k === "upper" ? .026 : -.048, k === "upper" ? .074 : .026, "rgba(255,255,255,.2)", "rgba(0,0,0,.45)"); }
+    PNT.groove(g, -.07, .026, .165, .026, .0011); PNT.groove(g, .08, .05, .18, .05, .0009);
+    PNT.marks(g, .085, .006, 9, .0034, "rgba(225,225,225,.55)"); PNT.marks(g, .085, -.004, 6, .0028, "rgba(225,225,225,.4)");   // chữ khắc bên trái hộp cò
+    g.fillStyle = "#e9e9e9"; g.fillRect(-.03, .006, .004, .004); g.fillStyle = "#d0202a"; g.fillRect(-.042, .006, .004, .004); g.fillRect(-.055, .006, .008, .004);
+    PNT.screw(g, -.062, .016, .0032); PNT.screw(g, .156, .016, .0032); PNT.screw(g, -.06, .062, .0032); PNT.screw(g, .178, .062, .0032);
+    PNT.poly(g, M4P.handle, "#33363b"); PNT.shade(g, M4P.handle, .074, .1); PNT.groove(g, -.05, .097, .11, .097, .0008);
+    for (const k of ["grip", "stock"]){ PNT.poly(g, M4P[k], "#1e1f22"); PNT.shade(g, M4P[k], k === "grip" ? -.112 : -.05, k === "grip" ? -.006 : .07, "rgba(255,255,255,.12)", "rgba(0,0,0,.5)"); }
+    for (let i = 0; i < 7; i++) PNT.groove(g, -.03 + i * .0028, -.03 - i * .011, .008 + i * .0012, -.028 - i * .011, .0013);   // khía tay cầm
+    for (let i = 0; i < 6; i++) PNT.groove(g, -.275, -.035 + i * .018, -.225, -.006 + i * .012, .0011);                       // gân báng rút
+    PNT.poly(g, M4P.mag, "#45484d"); PNT.shade(g, M4P.mag, -.178, -.044, "rgba(255,255,255,.18)", "rgba(0,0,0,.4)");
+    for (const o of [0, .02]) PNT.groove(g, .09 + o, -.05, .1 + o * 1.2, -.16, .0012);
+    PNT.poly(g, M4P.fsb, "#2b2d31"); PNT.shade(g, M4P.fsb, .03, .104);
+    for (const k of ["upper", "lower", "handle", "mag", "fsb"]) PNT.wear(g, M4P[k], .001, "rgba(255,255,255,.45)");
+    for (const k of ["grip", "stock"]) PNT.wear(g, M4P[k], .0009, "rgba(255,255,255,.18)");
+    PNT.dirt(g, -.3, -.2, .68, .14, 60); PNT.scratches(g, -.07, -.05, .19, .1, 80);
+  }, 2048);
+  m4Mat = { alu: paintedMat(tex, { color: 0x6a6a6a, roughness: .62, metalness: .35, envMapIntensity: .6 }), poly: paintedMat(tex, { color: 0x8a8a8a, roughness: .82, metalness: 0, envMapIntensity: .2, bumpMap: texGrain, bumpScale: .9 }) };
+  return m4Mat;
+}
+function buildM4(lod){
+  const g = new THREE.Group(), P = {}, m = m4Mats(), R = 1, L = -1, by = .045, sy = .115;
+  ext(g, m.alu, M4P.upper, .04, .005); ext(g, m.alu, M4P.lower, .034, .005);
+  ext(g, m.poly, M4P.grip, .028, .008); ext(g, m.alu, M4P.guard, .012, .002);
+  ext(g, sm.dark, spline([[.05, -.008], [.056, -.008], [.052, -.022], [.044, -.032], [.04, -.03], [.045, -.02], [.05, -.008]], 3), .006, .001);   // cò
+  // quai xách + thước ngắm lỗ tròn (vòng rỗng nên tâm ngắm luôn thấy đầu ruồi)
+  ext(g, m.alu, M4P.handle, .02, .004, 0, lod ? null : [M4P.handleHole]);
+  for (const sx of [-1, 1]) bx(g, sm.dark, .005, .022, .024, sx * .0095, .109, .059);
+  bx(g, sm.dark, .024, .006, .024, 0, .101, .059);
+  { const ring = new THREE.Mesh(new THREE.TorusGeometry(.0048, .0019, 8, 18), sm.dark); ring.position.set(0, sy, .059); g.add(ring); }
+  if (!lod) cxl(g, sm.dark, .006, .03, 0, .107, .03, 12);                                                                 // núm chỉnh tầm
+  // ống đệm + báng rút
+  cz(g, sm.dark, .0155, .0155, .2, 0, .052, .17, 14); cz(g, sm.steel, .018, .018, .008, 0, .052, .075, 12);
+  ext(g, m.poly, M4P.stock, .036, .01); ext(g, sm.rubber, [[-.29, -.045], [-.302, -.043], [-.302, .07], [-.29, .07]], .038, .004);
+  // ốp lót tay tròn có gân + vòng chữ D
+  cz(g, sm.rubber, .0235, .0235, .175, 0, by, -.2775, 18);
+  if (!lod){ for (let i = 0; i < 9; i++) cz(g, sm.poly, .0248, .0248, .006, 0, by, -.205 - i * .019, 18);
+    for (let i = 0; i < 6; i++) for (const sx of [-1, 1]) bx(g, gm.black, .003, .006, .01, sx * .0232, by + .008, -.22 - i * .025); }
+  cz(g, sm.dark, .029, .027, .014, 0, by, -.188, 18); cz(g, sm.dark, .024, .024, .008, 0, by, -.368, 18);
+  // nòng + đầu ruồi chữ A + lồng chim
+  cz(g, sm.dark, .0085, .0085, .25, 0, by, -.49, 12);
+  ext(g, m.alu, M4P.fsb, .022, .003, 0, lod ? null : [M4P.fsbHole]); bx(g, sm.dark, .0028, .014, .0028, 0, sy - .007, -.423);
+  for (const sx of [-1, 1]) bx(g, sm.dark, .003, .016, .012, sx * .008, .1, -.423);
+  cz(g, sm.dark, .011, .011, .045, 0, by, -.635, 12); cz(g, gm.black, .006, .006, .002, 0, by, -.6585, 10);
+  if (!lod) for (let i = 0; i < 4; i++){ const a = i * 1.2 - .6, s = bx(g, gm.black, .003, .003, .026, Math.sin(a) * .0108, by + Math.cos(a) * .0108, -.64); s.rotation.z = -a; }
+  // băng đạn STANAG 30 viên
+  P.mag = new THREE.Group(); g.add(P.mag); ext(P.mag, m.alu, M4P.mag, .022, .003);
+  ext(P.mag, sm.dark, [[.094, -.172], [.146, -.164], [.148, -.172], [.096, -.182]], .024, .002);
+  // khoá nòng lộ qua cửa thoát vỏ (phải) + tay kéo chữ T
+  P.bolt = new THREE.Group(); g.add(P.bolt);
+  bx(P.bolt, gm.worn, .003, .016, .05, R * .0205, .05, -.07); bx(P.bolt, sm.dark, .03, .006, .016, 0, .078, .07); bx(P.bolt, sm.dark, .01, .006, .03, 0, .078, .05);
+  if (!lod){
+    bx(g, gm.black, .002, .02, .066, R * .021, .05, -.07);                                                              // cửa thoát vỏ
+    cxl(g, sm.dark, .0065, .016, R * .026, .062, -.0, 10);                                                              // cụm đẩy khoá nòng
+    cxl(g, sm.steel, .005, .006, R * .019, .008, -.066, 8);                                                             // nút tháo băng
+    cxl(g, sm.steel, .005, .006, L * .019, .008, .0, 8); ext(g, sm.steel, [[-.022, .004], [.004, .008], [.004, .012], [-.022, .009]], .003, .0005, L * .0185);   // cần chọn chế độ bắn
+    ext(g, sm.dark, [[.1, .01], [.13, .012], [.13, .02], [.1, .02]], .004, .0006, L * .018);                            // lẫy hãm khoá nòng
+    for (const f of [-.06, .155]) cxl(g, sm.steel, .0035, .038, 0, .016, -f, 8);                                       // chốt tháo
+    cxl(g, sm.dark, .004, .05, 0, .02, .27, 8);
+  }
+  P.muzzle = new V3(0, by, -.66); P.eject = new V3(.03, .055, -.07); P.gripR = new V3(0, -.055, .02); P.gripL = new V3(0, .0, -.3); P.sightY = sy; P.hand = "fore";
+  g.userData = P; return g;
+}
+// ---- M249: hộp khoá nòng vuông, nắp nạp đạn, hộp đạn dây, nòng nặng có quai xách, chân chống gập
+function buildM249(lod){
+  const g = new THREE.Group(), P = {}, R = 1, L = -1, by = .05, sy = .115, al = m4Mats().alu;
+  ext(g, al, [[-.1, 0], [.26, 0], [.26, .085], [-.1, .085]], .05, .005);                                                // hộp khoá nòng
+  ext(g, sm.dark, [[-.07, .085], [.2, .085], [.19, .1], [-.06, .1]], .046, .004);                                       // nắp nạp đạn
+  if (!lod) cxl(g, sm.steel, .005, .05, 0, .09, .07, 8);
+  ext(g, sm.dark, [[-.06, .1], [-.03, .1], [-.032, .112], [-.058, .112]], .02, .002);                                  // lá thước ngắm
+  for (const sx of [-1, 1]) bx(g, sm.dark, .005, .012, .02, sx * .006, sy - .002, .045);
+  ext(g, sm.dark, [[-.06, 0], [.08, 0], [.08, -.016], [-.06, -.016]], .036, .004);                                       // hộp cò
+  ext(g, sm.poly, M4P.grip, .028, .008); ext(g, sm.dark, M4P.guard, .012, .002);
+  ext(g, sm.steel, spline([[.05, -.008], [.056, -.008], [.052, -.022], [.044, -.032], [.04, -.03], [.045, -.02], [.05, -.008]], 3), .006, .001);
+  ext(g, sm.poly, [[-.1, .075], [-.37, .062], [-.38, -.07], [-.355, -.078], [-.2, -.02], [-.1, -.002]], .04, .012, 0, lod ? null : [[[-.3, -.002], [-.17, .012], [-.17, .05], [-.3, .045]]]);   // báng có lỗ
+  ext(g, sm.rubber, [[-.38, -.07], [-.392, -.068], [-.392, .062], [-.38, .062]], .042, .004);
+  ext(g, sm.poly, [[.26, .002], [.44, .006], [.44, .058], [.26, .062]], .052, .012);                                    // ốp lót tay
+  if (!lod) for (let i = 0; i < 5; i++) for (const sx of [-1, 1]) bx(g, gm.black, .003, .03, .008, sx * .026, .032, -.29 - i * .03);
+  cz(g, sm.dark, .0125, .0125, .48, 0, by, -.5, 14); cz(g, sm.dark, .009, .009, .3, 0, .018, -.45, 10);                // nòng + ống trích khí
+  cz(g, sm.dark, .0145, .0135, .05, 0, by, -.765, 14); cz(g, gm.black, .008, .008, .002, 0, by, -.791, 10);            // loa che lửa
+  ext(g, sm.dark, [[.61, .055], [.63, .055], [.627, sy], [.613, sy]], .006, .001); cz(g, sm.dark, .016, .016, .02, 0, by, -.62, 14);   // đầu ruồi
+  { const h = bx(g, sm.poly, .014, .014, .09, 0, .1, -.51); h.rotation.x = .08; bx(g, sm.dark, .01, .04, .01, 0, .075, -.48); bx(g, sm.dark, .01, .04, .01, 0, .075, -.54); }   // quai xách nòng
+  for (const sx of [-1, 1]){ const leg = bx(g, sm.dark, .006, .006, .24, sx * .012, -.004, -.5); leg.rotation.x = -.04; bx(g, sm.rubber, .01, .01, .02, sx * .012, -.008, -.385); }   // chân chống gập
+  P.mag = new THREE.Group(); g.add(P.mag);                                                                              // hộp đạn dây 200 viên
+  bx(P.mag, sm.green, .07, .1, .11, L * .028, -.062, -.13); bx(P.mag, sm.green2, .072, .012, .112, L * .028, -.006, -.13);
+  if (!lod) for (let i = 0; i < 5; i++){ const r = cxl(P.mag, gm.brass, .0045, .03, L * .036, .006 + i * .016, -.12, 8); r.rotation.y = .3; }
+  P.bolt = new THREE.Group(); g.add(P.bolt);
+  cxl(P.bolt, sm.dark, .006, .03, R * .036, .055, -.2, 8); bx(P.bolt, gm.worn, .003, .02, .05, R * .0255, .045, -.06);
+  if (!lod) bx(g, gm.black, .002, .026, .066, R * .026, .045, -.06);
+  P.muzzle = new V3(0, by, -.8); P.eject = new V3(.035, .02, -.06); P.gripR = new V3(0, -.055, .02); P.gripL = new V3(0, .0, -.36); P.sightY = sy; P.hand = "fore";
+  g.userData = P; return g;
+}
+// ============================================================================
+// Bộ chi tiết dùng chung cho các khẩu còn lại (mỗi khẩu một dáng riêng theo súng thật)
+// ============================================================================
+const sh = (pts, df = 0, dy = 0) => pts.map(([f, y]) => [f + df, y + dy]);
+const TRIG = spline([[.05, -.008], [.056, -.008], [.052, -.022], [.044, -.032], [.04, -.03], [.045, -.02], [.05, -.008]], 3);
+const matMagTr = M({ color: 0x7d7058, transparent: true, opacity: .72, roughness: .35 });
+function kitGrip(p, mat, df = 0, guard = sm.dark){ ext(p, mat, sh(M4P.grip, df), .028, .008); ext(p, guard, sh(M4P.guard, df), .012, .002); ext(p, sm.steel, sh(TRIG, df), .006, .001); }
+function tubeOpen(p, mat, r1, r2, len, y, zc){ const geo = new THREE.CylinderGeometry(r1, r2, len, 20, 1, true); geo.rotateX(Math.PI / 2); const m = new THREE.Mesh(geo, mat); m.position.set(0, y, zc); p.add(m); return m; }
+// ống ngắm từ f0 (sau) tới f1 (trước), trục ở y; open = ống rỗng không kính (ngắm xuyên qua khi không có màn scope đen)
+function kitScope(p, f0, f1, y, r, open, lod, base){
+  const L = f1 - f0, zc = -(f0 + f1) / 2, zF = -(f1 - L * .1), zB = -(f0 + L * .1);
+  if (open){ tubeOpen(p, sm.dark, r, r, L * .6, y, zc); tubeOpen(p, sm.dark, r, r * 1.3, L * .2, y, zF); tubeOpen(p, sm.dark, r * 1.15, r, L * .2, y, zB); }
+  else { cz(p, sm.dark, r, r, L * .6, 0, y, zc, 18); cz(p, sm.dark, r, r * 1.32, L * .2, 0, y, zF, 18); cz(p, sm.dark, r * 1.2, r, L * .2, 0, y, zB, 18);
+    cz(p, sm.lens, r * 1.22, r * 1.22, .002, 0, y, -(f1 - .001), 18); cz(p, sm.lens, r * 1.1, r * 1.1, .002, 0, y, -(f0 + .001), 18); }
+  if (!lod){ const t = new THREE.Mesh(new THREE.CylinderGeometry(r * .5, r * .5, r * 1.1, 10), sm.dark); t.position.set(0, y + r * 1.25, zc); p.add(t); cxl(p, sm.dark, r * .5, r * 2.7, 0, y, zc, 10); }
+  for (const f of [f0 + L * .28, f0 + L * .72]){ cz(p, sm.dark, r * 1.12, r * 1.12, .012, 0, y, -f, 16); bx(p, sm.dark, r * 1.2, y - base, .012, 0, (y + base) / 2, -f); }
+}
+function legsFolded(p, f0, f1, y, w){ for (const sx of [-1, 1]) bx(p, sm.dark, .006, .006, f1 - f0, sx * w, y, -(f0 + f1) / 2); }
+
+// ---- súng lục: USP, P228, Five-seveN, Dual Berettas (cùng hệ toạ độ với buildPistol)
+function buildHandgun(o, lod){
+  const g = new THREE.Group(), P = {}, L = o.len, top = .05 + (o.dh || 0), by = o.open ? .04 : .033;
+  ext(g, o.frame, [[-.012, .014], [L - .006, .014], [L - .006, -.004], [.04, -.006], [.024, -.03], [.004, -.105], [-.038, -.11], [-.046, -.1], [-.028, -.035], [-.032, -.004]], .028, .006);
+  ext(g, o.frame, o.guard || [[.03, -.045], [.086, -.045], [.098, -.006], [.09, -.006], [.08, -.039], [.03, -.039]], .012, .002);
+  ext(g, sm.steel, [[.052, -.006], [.059, -.006], [.054, -.022], [.046, -.03], [.043, -.027], [.049, -.02]], .005, .001);
+  if (o.panel) ext(g, o.panel, [[-.026, -.03], [.012, -.03], [-.002, -.098], [-.038, -.1]], .031, .004);
+  if (o.rail && !lod) for (let i = 0; i < 3; i++) bx(g, gm.black, .022, .003, .004, 0, -.005, -(L - .02 - i * .012));
+  if (o.hammer) bx(g, sm.dark, .008, .016, .008, 0, top - .008, .024);
+  P.bolt = new THREE.Group(); g.add(P.bolt);
+  if (o.open){                                                                                                    // khoá nòng hở đỉnh kiểu Beretta, lộ nòng
+    ext(P.bolt, o.slide, [[-.02, .016], [.07, .016], [.075, top], [-.014, top], [-.02, top - .006]], .029, .004);
+    ext(P.bolt, o.slide, [[.07, .016], [L, .016], [L, .034], [.075, .034]], .029, .003);
+    cz(g, gm.worn, .0075, .0075, L - .07, 0, by, -(L + .07) / 2, 12);
+  } else ext(P.bolt, o.slide, [[-.02, .016], [L, .016], [L, top - .007], [L - .006, top], [-.014, top], [-.02, top - .006]], .029, .004);
+  if (!lod) for (let i = 0; i < 6; i++) bx(P.bolt, gm.black, .0305, .02, .0025, 0, .032, .012 - i * .006);
+  bx(P.bolt, gm.steel, .004, .007, .006, 0, top + .0035, -(L - .01)); bx(P.bolt, gm.steel, .018, .007, .008, 0, top + .0035, .01); bx(P.bolt, gm.black, .005, .008, .009, 0, top + .004, .01);
+  if (!o.open) bx(P.bolt, gm.worn, .012, .003, .034, .008, top - .0005, -.07);
+  cz(g, gm.steel, .0072, .0072, .02, 0, by, -L); cz(g, gm.black, .0045, .0045, .002, 0, by, -(L + .0105), 8);
+  P.mag = new THREE.Group(); g.add(P.mag); ext(P.mag, gm.steel, [[-.038, -.106], [.006, -.103], [.003, -.114], [-.042, -.117]], .027, .003);
+  P.muzzle = new V3(0, by, -(L + .012)); P.eject = new V3(.02, .05, -.06); P.gripR = new V3(0, -.05, .02); P.gripL = new V3(-.03, -.075, .016); P.sightY = top + .0075; P.hand = "grip";
+  g.userData = P; return g;
+}
+const buildUSP = lod => buildHandgun({ len: .19, dh: .003, frame: sm.poly, slide: sm.dark, rail: true }, lod);
+const buildP228 = lod => buildHandgun({ len: .168, frame: sm.dark, slide: sm.steel, panel: sm.rubber, hammer: true }, lod);
+const buildFiveseven = lod => buildHandgun({ len: .19, dh: .006, frame: sm.green2, slide: sm.dark, rail: true,
+  guard: [[.03, -.05], [.09, -.05], [.1, -.006], [.092, -.006], [.084, -.044], [.03, -.044]] }, lod);
+const buildElite = lod => buildHandgun({ len: .18, frame: sm.dark, slide: sm.nickel, panel: sm.rubber, hammer: true, open: true }, lod);
+
+// ---- tiểu liên
+function buildMAC10(lod){
+  const g = new THREE.Group(), P = {}, by = .045;
+  ext(g, sm.dark, [[-.08, 0], [.18, 0], [.18, .075], [-.07, .075], [-.08, .065]], .044, .005);                     // hộp thân vuông
+  ext(g, sm.dark, [[.02, .002], [.012, -.112], [-.026, -.114], [-.032, .002]], .03, .006);                         // tay cầm (chứa băng)
+  ext(g, sm.dark, [[.02, -.045], [.07, -.045], [.075, -.004], [.068, -.004], [.064, -.039], [.02, -.039]], .012, .002); ext(g, sm.steel, TRIG, .006, .001);
+  P.mag = new THREE.Group(); g.add(P.mag); ext(P.mag, sm.steel, [[.01, -.11], [.012, -.205], [-.026, -.205], [-.024, -.112]], .024, .003);
+  P.bolt = new THREE.Group(); g.add(P.bolt); bx(P.bolt, sm.steel, .008, .012, .014, 0, .082, -.05); bx(g, gm.black, .006, .002, .1, 0, .0755, -.06);
+  for (const sx of [-1, 1]) bx(g, sm.dark, .005, .014, .008, sx * .006, .082, .06); bx(g, sm.dark, .003, .014, .004, 0, .082, -.17);
+  cz(g, sm.steel, .009, .009, .07, 0, by, -.215, 12); if (!lod) for (let i = 0; i < 6; i++) cz(g, sm.dark, .0098, .0098, .003, 0, by, -.19 - i * .01, 12);
+  cz(g, gm.black, .005, .005, .002, 0, by, -.251, 8);
+  bx(g, sm.steel, .05, .06, .006, 0, .035, .09); for (const sx of [-1, 1]) cz(g, sm.steel, .0028, .0028, .2, sx * .025, .02, -.01, 6);   // báng dây thu gọn
+  P.muzzle = new V3(0, by, -.26); P.eject = new V3(.03, .06, -.05); P.gripR = new V3(0, -.055, .02); P.gripL = new V3(0, .02, -.2); P.sightY = .089; P.hand = "fore";
+  g.userData = P; return g;
+}
+function buildTMP(lod){
+  const g = new THREE.Group(), P = {};
+  ext(g, sm.poly, [[-.07, .01], [.2, .01], [.2, .07], [.1, .075], [-.06, .075], [-.07, .06]], .042, .008);
+  ext(g, sm.poly, [[-.05, .012], [.2, .012], [.2, -.006], [-.05, -.006]], .036, .004);
+  ext(g, sm.poly, [[.022, 0], [.012, -.11], [-.028, -.112], [-.034, 0]], .03, .007);
+  ext(g, sm.poly, [[.02, -.045], [.07, -.045], [.075, -.004], [.068, -.004], [.064, -.039], [.02, -.039]], .012, .002); ext(g, sm.steel, TRIG, .006, .001);
+  ext(g, sm.poly, spline([[.15, -.006], [.148, -.08], [.162, -.09], [.178, -.08], [.18, -.006]], 2), .026, .007);    // tay cầm trước
+  P.mag = new THREE.Group(); g.add(P.mag); ext(P.mag, sm.dark, [[.01, -.11], [.012, -.21], [-.026, -.21], [-.024, -.112]], .022, .003);
+  cz(g, sm.dark, .017, .017, .2, 0, .045, -.31, 18); cz(g, gm.black, .006, .006, .002, 0, .045, -.411, 10);       // ống giảm thanh
+  for (const sx of [-1, 1]) bx(g, sm.dark, .005, .012, .008, sx * .006, .081, .05); bx(g, sm.dark, .003, .012, .004, 0, .081, -.19);
+  P.bolt = new THREE.Group(); g.add(P.bolt); bx(P.bolt, sm.dark, .03, .008, .012, 0, .078, .055);
+  P.muzzle = new V3(0, .045, -.415); P.eject = new V3(.03, .055, -.05); P.gripR = new V3(0, -.055, .02); P.gripL = new V3(0, -.06, -.165); P.sightY = .087; P.hand = "fore";
+  g.userData = P; return g;
+}
+function buildUMP(lod){
+  const g = new THREE.Group(), P = {};
+  ext(g, sm.poly, [[-.09, .005], [.33, .005], [.33, .072], [-.09, .072]], .044, .008, 0, lod ? null : [slot(.2, .24, .025, .04), slot(.26, .3, .025, .04)]);
+  bx(g, sm.dark, .02, .006, .38, 0, .075, -.12); if (!lod) for (let i = 0; i < 14; i++) bx(g, gm.black, .022, .003, .004, 0, .079, .06 - i * .026);
+  kitGrip(g, sm.poly, 0, sm.poly); ext(g, sm.poly, [[.07, .006], [.135, .006], [.135, -.03], [.07, -.03]], .038, .004);
+  P.mag = new THREE.Group(); g.add(P.mag); ext(P.mag, sm.poly, [[.075, -.03], [.13, -.03], [.14, -.18], [.085, -.18]], .026, .004);
+  cz(g, sm.dark, .011, .011, .05, 0, .04, -.355, 12); cz(g, gm.black, .006, .006, .002, 0, .04, -.381, 8);
+  ext(g, sm.poly, [[-.09, .06], [-.34, .05], [-.34, -.04], [-.31, -.045], [-.2, -.005], [-.09, .01]], .03, .008, 0, lod ? null : [[[-.3, 0], [-.13, .016], [-.13, .045], [-.3, .04]]]);   // báng gấp khung
+  for (const sx of [-1, 1]) bx(g, sm.dark, .004, .014, .01, sx * .006, .084, .06); bx(g, sm.dark, .003, .012, .004, 0, .084, -.31);
+  P.bolt = new THREE.Group(); g.add(P.bolt); cxl(P.bolt, sm.dark, .005, .03, -.03, .055, -.3, 8);
+  P.muzzle = new V3(0, .04, -.385); P.eject = new V3(.03, .05, -.06); P.gripR = new V3(0, -.055, .02); P.gripL = new V3(0, 0, -.26); P.sightY = .091; P.hand = "fore";
+  g.userData = P; return g;
+}
+function buildP90(lod){
+  const g = new THREE.Group(), P = {};
+  const body = spline([[-.28, .03], [-.26, .06], [.2, .06], [.24, .04], [.26, 0], [.24, -.04], [.18, -.07], [.1, -.07], [.08, -.11], [.03, -.12], [-.08, -.12], [-.2, -.1], [-.27, -.04]], 3);
+  ext(g, sm.poly, body, .05, .012, 0, lod ? null : [[[-.04, -.03], [-.1, -.03], [-.11, -.09], [-.045, -.095]], [[.022, -.02], [.075, -.02], [.08, -.07], [.025, -.075]]]);   // lỗ ngón cái + lỗ cò
+  ext(g, sm.steel, sh(TRIG, -.005), .006, .001);
+  P.mag = new THREE.Group(); g.add(P.mag); ext(P.mag, matMagTr, [[-.2, .06], [.2, .06], [.2, .085], [-.2, .085]], .05, .004);
+  if (!lod) bx(P.mag, gm.brass, .036, .008, .36, 0, .07, 0);
+  for (const f of [.04, .13]) bx(g, sm.dark, .012, .03, .012, 0, .095, -f);
+  tubeOpen(g, sm.dark, .016, .016, .1, .11, -.085);                                                                // kính ngắm vòng
+  cz(g, sm.dark, .011, .011, .06, 0, .035, -.29, 12); cz(g, gm.black, .006, .006, .002, 0, .035, -.321, 8);
+  P.bolt = new THREE.Group(); g.add(P.bolt); cxl(P.bolt, sm.dark, .005, .07, 0, .03, -.2, 8);
+  P.muzzle = new V3(0, .035, -.325); P.eject = new V3(0, -.11, .05); P.gripR = new V3(0, -.055, .02); P.gripL = new V3(0, -.04, -.2); P.sightY = .11; P.hand = "fore";
+  g.userData = P; return g;
+}
+
+// ---- súng trường
+function buildGalil(lod){
+  const g = new THREE.Group(), P = {};
+  ext(g, sm.dark, [[-.09, .012], [.24, .012], [.24, .066], [-.06, .07], [-.09, .06]], .044, .005);
+  ext(g, sm.poly, spline([[.24, .006], [.24, .07], [.44, .066], [.45, .04], [.44, .01], [.24, .006]], 3), .05, .012, 0, lod ? null : [slot(.28, .33, .035, .048), slot(.36, .41, .035, .048)]);
+  kitGrip(g, sm.poly); ext(g, sm.dark, [[.08, .014], [.15, .014], [.15, -.012], [.08, -.012]], .036, .003);
+  P.mag = new THREE.Group(); g.add(P.mag); ext(P.mag, sm.dark, spline([[.088, -.01], [.09, -.09], [.1, -.16], [.12, -.21], [.17, -.2], [.15, -.14], [.14, -.08], [.138, -.01]], 3), .026, .003);
+  cz(g, sm.dark, .009, .009, .25, 0, .045, -.575, 12); cz(g, sm.dark, .007, .007, .2, 0, .078, -.55, 10);
+  ext(g, sm.dark, [[.6, .03], [.635, .03], [.632, .099], [.618, .099], [.61, .06]], .016, .002); bx(g, sm.dark, .003, .012, .004, 0, .099, -.625);
+  for (const sx of [-1, 1]) bx(g, sm.dark, .004, .03, .012, sx * .006, .09, .04);
+  cz(g, sm.dark, .012, .011, .04, 0, .045, -.72, 12); cz(g, gm.black, .006, .006, .002, 0, .045, -.741, 8);
+  cz(g, sm.dark, .007, .007, .26, 0, .06, .21, 8); { const t = bx(g, sm.dark, .012, .012, .25, 0, -.01, .205); t.rotation.x = .235; } bx(g, sm.rubber, .04, .1, .012, 0, .01, .34);   // báng khung gấp
+  legsFolded(g, .3, .52, .0, .012);
+  P.bolt = new THREE.Group(); g.add(P.bolt); bx(P.bolt, gm.worn, .004, .02, .078, .0225, .05, -.075); { const h = cxl(P.bolt, sm.dark, .005, .03, .038, .058, -.11, 8); h.rotation.z = Math.PI / 2 - .5; }
+  P.muzzle = new V3(0, .045, -.745); P.eject = new V3(.035, .06, -.07); P.gripR = new V3(0, -.055, .02); P.gripL = new V3(0, 0, -.33); P.sightY = .105; P.hand = "fore";
+  g.userData = P; return g;
+}
+function buildSG552(lod){
+  const g = new THREE.Group(), P = {};
+  ext(g, sm.dark, [[-.08, .01], [.2, .01], [.2, .075], [-.08, .075]], .042, .006);
+  kitGrip(g, sm.poly); ext(g, sm.poly, [[-.07, .012], [.17, .012], [.17, -.01], [-.05, -.012]], .036, .004);
+  P.mag = new THREE.Group(); g.add(P.mag); ext(P.mag, matMagTr, spline([[.088, -.01], [.09, -.08], [.1, -.14], [.148, -.135], [.138, -.08], [.136, -.01]], 3), .024, .003);
+  ext(g, sm.poly, [[.2, 0], [.36, .006], [.36, .07], [.2, .075]], .05, .012, 0, lod ? null : [slot(.23, .27, .03, .046), slot(.29, .33, .03, .046)]);
+  cz(g, sm.dark, .0095, .0095, .12, 0, .045, -.42, 12); bx(g, sm.dark, .02, .04, .02, 0, .065, -.38);
+  cz(g, sm.dark, .012, .011, .04, 0, .045, -.5, 12); cz(g, gm.black, .006, .006, .002, 0, .045, -.521, 8);
+  ext(g, sm.poly, [[-.08, .068], [-.33, .06], [-.34, -.05], [-.31, -.055], [-.2, -.005], [-.08, .012]], .03, .008, 0, lod ? null : [[[-.29, 0], [-.12, .018], [-.12, .05], [-.29, .045]]]);
+  kitScope(g, -.08, .1, .12, .016, true, lod, .075);
+  P.bolt = new THREE.Group(); g.add(P.bolt); cxl(P.bolt, sm.dark, .005, .03, .035, .055, -.12, 8);
+  P.muzzle = new V3(0, .045, -.525); P.eject = new V3(.03, .055, -.06); P.gripR = new V3(0, -.055, .02); P.gripL = new V3(0, 0, -.28); P.sightY = .12; P.hand = "fore";
+  g.userData = P; return g;
+}
+function buildAUG(lod){
+  const g = new THREE.Group(), P = {}, G = sm.green;
+  ext(g, G, spline([[-.44, -.05], [-.44, .055], [-.38, .062], [0, .062], [.14, .058], [.16, .03], [.16, 0], [.04, -.008], [-.03, -.008], [-.12, -.012], [-.2, -.03], [-.3, -.05]], 3), .056, .012);
+  ext(g, sm.rubber, [[-.44, -.05], [-.452, -.05], [-.452, .055], [-.44, .055]], .056, .004);
+  ext(g, G, M4P.grip, .03, .009); ext(g, G, [[0, -.1], [.14, -.1], [.14, -.006], [.13, -.006], [.13, -.09], [.01, -.09]], .02, .004); ext(g, sm.dark, TRIG, .006, .001);   // tay cầm + vành cò lớn
+  ext(g, G, spline([[.13, -.006], [.128, -.11], [.142, -.12], [.158, -.11], [.16, -.006]], 2), .028, .008);           // tay cầm trước
+  P.mag = new THREE.Group(); g.add(P.mag); ext(P.mag, matMagTr, spline([[-.12, -.01], [-.12, -.09], [-.11, -.15], [-.06, -.155], [-.065, -.09], [-.06, -.01]], 3), .026, .003);
+  cz(g, sm.dark, .011, .011, .3, 0, .03, -.31, 14); cz(g, sm.dark, .013, .012, .04, 0, .03, -.48, 12); cz(g, gm.black, .006, .006, .002, 0, .03, -.501, 8);
+  ext(g, G, [[-.14, .062], [.12, .062], [.1, .09], [-.12, .09]], .03, .006); kitScope(g, -.12, .1, .115, .018, true, lod, .09);   // quai xách liền kính
+  P.bolt = new THREE.Group(); g.add(P.bolt); cxl(P.bolt, sm.dark, .005, .03, -.035, .04, -.1, 8);
+  P.muzzle = new V3(0, .03, -.505); P.eject = new V3(.035, .03, .1); P.gripR = new V3(0, -.055, .02); P.gripL = new V3(0, -.06, -.145); P.sightY = .115; P.hand = "fore";
+  g.userData = P; return g;
+}
+function buildFAMAS(lod){
+  const g = new THREE.Group(), P = {};
+  ext(g, sm.poly, spline([[-.42, -.05], [-.42, .05], [-.34, .06], [.08, .06], [.3, .05], [.34, .03], [.34, -.002], [.1, -.008], [-.03, -.01], [-.1, -.03], [-.25, -.05]], 3), .05, .012);
+  ext(g, sm.rubber, [[-.42, -.05], [-.432, -.05], [-.432, .05], [-.42, .05]], .05, .004);
+  ext(g, sm.poly, [[-.24, .06], [.28, .06], [.27, .075], [.22, .11], [-.2, .12], [-.24, .1]], .016, .004, 0, lod ? null : [[[-.18, .07], [.2, .07], [.17, .1], [-.15, .105]]]);   // quai xách dài
+  for (const sx of [-1, 1]) bx(g, sm.dark, .005, .018, .016, sx * .0095, .127, .17); bx(g, sm.dark, .024, .006, .016, 0, .121, .17);
+  { const ring = new THREE.Mesh(new THREE.TorusGeometry(.0048, .0019, 8, 18), sm.dark); ring.position.set(0, .135, .17); g.add(ring); }
+  bx(g, sm.dark, .003, .022, .004, 0, .124, -.22);
+  ext(g, sm.poly, M4P.grip, .028, .008); ext(g, sm.poly, [[0, -.1], [.09, -.1], [.1, -.008], [.09, -.008], [.085, -.09], [.01, -.09]], .02, .004); ext(g, sm.steel, TRIG, .006, .001);
+  P.mag = new THREE.Group(); g.add(P.mag); ext(P.mag, sm.dark, [[-.13, -.02], [-.075, -.02], [-.075, -.13], [-.13, -.13]], .024, .003);
+  cz(g, sm.dark, .01, .01, .18, 0, .025, -.43, 12); cz(g, sm.dark, .012, .012, .035, 0, .025, -.535, 12); cz(g, gm.black, .006, .006, .002, 0, .025, -.553, 8);
+  legsFolded(g, .1, .32, .03, .03);
+  P.bolt = new THREE.Group(); g.add(P.bolt); bx(P.bolt, sm.dark, .02, .008, .02, 0, .07, -.05);
+  P.muzzle = new V3(0, .025, -.555); P.eject = new V3(.03, .02, .1); P.gripR = new V3(0, -.055, .02); P.gripL = new V3(0, -.01, -.25); P.sightY = .135; P.hand = "fore";
+  g.userData = P; return g;
+}
+// ---- súng bắn tỉa
+function buildScout(lod){
+  const g = new THREE.Group(), P = {};
+  ext(g, sm.poly, spline([[-.36, .04], [-.36, -.06], [-.32, -.066], [-.16, -.035], [-.08, -.02], [-.05, -.1], [-.02, -.108], [0, -.09], [.02, -.03], [.06, -.01], [.36, 0], [.38, .012], [.38, .035], [.1, .04], [-.06, .045], [-.2, .05]], 3), .036, .01);
+  ext(g, sm.rubber, [[-.36, -.06], [-.372, -.058], [-.372, .04], [-.36, .042]], .038, .004);
+  ext(g, sm.dark, [[-.06, .035], [.2, .035], [.2, .07], [-.05, .072], [-.06, .065]], .03, .005);
+  ext(g, sm.steel, [[.014, -.046], [.07, -.046], [.082, -.006], [.075, -.006], [.066, -.04], [.014, -.04]], .012, .002); ext(g, sm.steel, sh(TRIG, -.008), .006, .001);
+  P.mag = new THREE.Group(); g.add(P.mag); ext(P.mag, sm.poly, [[.08, 0], [.13, 0], [.13, -.035], [.08, -.035]], .03, .003);
+  cz(g, sm.dark, .0095, .008, .42, 0, .055, -.59, 12); cz(g, gm.black, .005, .005, .002, 0, .055, -.801, 8);
+  kitScope(g, -.1, .2, .115, .015, false, lod, .072); legsFolded(g, .2, .36, -.004, .01);
+  P.bolt = new THREE.Group(); g.add(P.bolt); cxl(P.bolt, sm.steel, .004, .04, .03, .06, .03, 8); { const k = new THREE.Mesh(new THREE.SphereGeometry(.009, 10, 8), sm.dark); k.position.set(.05, .058, .03); P.bolt.add(k); }
+  P.muzzle = new V3(0, .055, -.805); P.eject = new V3(.03, .07, -.05); P.gripR = new V3(0, -.06, .025); P.gripL = new V3(0, -.01, -.3); P.sightY = .115; P.hand = "fore";
+  g.userData = P; return g;
+}
+function buildSG550(lod){
+  const g = new THREE.Group(), P = {};
+  ext(g, sm.dark, [[-.09, .008], [.22, .008], [.22, .075], [-.09, .075]], .042, .006);
+  kitGrip(g, sm.poly); ext(g, sm.poly, [[-.07, .01], [.17, .01], [.17, -.012], [-.05, -.012]], .036, .004);
+  ext(g, sm.poly, [[-.09, .07], [-.2, .075], [-.24, .1], [-.38, .1], [-.4, .08], [-.4, -.06], [-.37, -.065], [-.3, -.02], [-.2, 0], [-.09, .01]], .034, .008, 0, lod ? null : [[[-.33, 0], [-.22, .015], [-.22, .05], [-.33, .05]]]);
+  ext(g, sm.green2, [[.22, .002], [.48, .008], [.48, .068], [.22, .074]], .05, .012, 0, lod ? null : [slot(.26, .31, .03, .046), slot(.34, .39, .03, .046)]);
+  cz(g, sm.dark, .011, .011, .32, 0, .042, -.64, 12); cz(g, sm.dark, .013, .012, .04, 0, .042, -.82, 12); cz(g, gm.black, .006, .006, .002, 0, .042, -.841, 8);
+  P.mag = new THREE.Group(); g.add(P.mag); ext(P.mag, matMagTr, spline([[.09, -.01], [.092, -.09], [.104, -.15], [.15, -.145], [.14, -.09], [.138, -.01]], 3), .026, .003);
+  kitScope(g, -.1, .2, .125, .017, false, lod, .075); legsFolded(g, .3, .5, 0, .028);
+  P.bolt = new THREE.Group(); g.add(P.bolt); cxl(P.bolt, sm.dark, .005, .03, .035, .055, -.12, 8);
+  P.muzzle = new V3(0, .042, -.845); P.eject = new V3(.03, .055, -.06); P.gripR = new V3(0, -.055, .02); P.gripL = new V3(0, 0, -.35); P.sightY = .125; P.hand = "fore";
+  g.userData = P; return g;
+}
+function buildG3SG1(lod){
+  const g = new THREE.Group(), P = {};
+  ext(g, sm.dark, [[-.1, 0], [.25, 0], [.25, .07], [-.1, .07]], .046, .005);
+  cz(g, sm.dark, .011, .011, .3, 0, .08, -.38, 12);                                                               // ống lên đạn trên nòng
+  ext(g, sm.poly, [[.25, -.004], [.46, 0], [.46, .065], [.25, .066]], .056, .012, 0, lod ? null : [slot(.28, .32, .02, .04), slot(.35, .39, .02, .04), slot(.42, .45, .02, .04)]);
+  cz(g, sm.dark, .0105, .0105, .32, 0, .045, -.6, 12); cz(g, sm.dark, .014, .014, .05, 0, .045, -.78, 12); cz(g, gm.black, .006, .006, .002, 0, .045, -.806, 8);
+  kitGrip(g, sm.poly); ext(g, sm.poly, [[-.08, .002], [.17, .002], [.17, -.02], [.06, -.02], [-.06, -.012]], .038, .004);
+  P.mag = new THREE.Group(); g.add(P.mag); ext(P.mag, sm.dark, [[.08, 0], [.15, 0], [.155, -.14], [.09, -.14]], .028, .003);
+  ext(g, sm.poly, [[-.1, .06], [-.38, .055], [-.39, -.08], [-.36, -.085], [-.2, -.03], [-.1, 0]], .04, .01);
+  ext(g, sm.rubber, [[-.34, .055], [-.18, .058], [-.18, .08], [-.34, .08]], .03, .006); ext(g, sm.rubber, [[-.39, -.08], [-.402, -.078], [-.402, .055], [-.39, .055]], .042, .004);
+  kitScope(g, -.08, .2, .12, .017, false, lod, .07);
+  P.bolt = new THREE.Group(); g.add(P.bolt); cxl(P.bolt, sm.dark, .005, .035, -.03, .08, -.48, 8);
+  P.muzzle = new V3(0, .045, -.81); P.eject = new V3(.035, .05, -.06); P.gripR = new V3(0, -.055, .02); P.gripL = new V3(0, 0, -.35); P.sightY = .12; P.hand = "fore";
+  g.userData = P; return g;
+}
+// ---- XM1014: bán tự động, ống đạn dưới nòng, báng rút, thước ngắm vòng
+function buildXM1014(lod){
+  const g = new THREE.Group(), P = {};
+  ext(g, sm.dark, [[-.08, 0], [.2, 0], [.2, .07], [-.06, .075], [-.08, .065]], .046, .005);
+  kitGrip(g, sm.poly); ext(g, sm.dark, [[-.06, .002], [.16, .002], [.16, -.012], [-.06, -.012]], .038, .003);
+  cz(g, sm.dark, .0155, .0155, .2, 0, .05, .17, 14); ext(g, sm.poly, M4P.stock, .036, .01); ext(g, sm.rubber, [[-.29, -.045], [-.302, -.043], [-.302, .07], [-.29, .07]], .038, .004);
+  cz(g, sm.dark, .0125, .0125, .5, 0, .052, -.45, 14); cz(g, gm.black, .008, .008, .002, 0, .052, -.701, 10);
+  cz(g, sm.dark, .0135, .0135, .36, 0, .018, -.38, 14); cz(g, sm.steel, .015, .015, .02, 0, .018, -.565, 14);
+  ext(g, sm.poly, [[.22, -.006], [.42, -.006], [.42, .036], [.22, .036]], .046, .01);
+  bx(g, sm.dark, .003, .035, .004, 0, .0825, -.68); bx(g, sm.dark, .02, .02, .012, 0, .083, .04);
+  { const ring = new THREE.Mesh(new THREE.TorusGeometry(.007, .0022, 8, 18), sm.dark); ring.position.set(0, .1, .04); g.add(ring); }
+  P.bolt = new THREE.Group(); g.add(P.bolt); bx(P.bolt, sm.steel, .004, .018, .05, .024, .04, -.07); cxl(P.bolt, sm.steel, .005, .025, .035, .04, -.08, 8);
+  P.muzzle = new V3(0, .052, -.705); P.eject = new V3(.03, .05, -.07); P.gripR = new V3(0, -.055, .02); P.gripL = new V3(0, 0, -.32); P.sightY = .1; P.hand = "fore";
+  g.userData = P; return g;
+}
 function cap(p, mat, ax, ay, az, bx_, by, bz, r){
   const a = new V3(ax, ay, az), b = new V3(bx_, by, bz), m = new THREE.Mesh(new THREE.CapsuleGeometry(r, a.distanceTo(b), 3, 8), mat);
   m.position.addVectors(a, b).multiplyScalar(.5); m.quaternion.setFromUnitVectors(UP, b.sub(a).normalize()); p.add(m); return m;
@@ -1193,6 +1714,22 @@ const MODELS = {};
 try { const L = new GLTFLoader(); await Promise.all(["akm", "glock", "shotgun", "swat", "soldier"].map(async k => { MODELS[k] = await L.loadAsync(`models/${k}.glb`); })); }
 catch (e){ console.warn("Không nạp được model glTF, dùng model dựng sẵn", e); for (const k in MODELS) delete MODELS[k]; }
 const GL = !!(MODELS.swat && MODELS.soldier && MODELS.akm && MODELS.glock && MODELS.shotgun);
+// ---------- view-model gốc CS 1.6 (goldsrc/models/v_*.mdl, tải bằng goldsrc/fetch.py, không commit). Thiếu thì dùng model ở trên.
+const GSV = { glock: "glock18", usp: "usp", p228: "p228", deagle: "deagle", elite: "elite", fiveseven: "fiveseven", m3: "m3", xm1014: "xm1014",
+  mac10: "mac10", tmp: "tmp", mp5: "mp5", ump45: "ump45", p90: "p90", galil: "galil", famas: "famas", ak47: "ak47", scout: "scout", m4a1: "m4a1",
+  sg552: "sg552", aug: "aug", awp: "awp", sg550: "sg550", g3sg1: "g3sg1", m249: "m249", knife: "knife", he: "hegrenade", flash: "flashbang", smoke: "smokegrenade" };
+const GSMDL = {};
+if (!new URLSearchParams(location.search).has("nogs")) try {
+  const probe = await fetch("goldsrc/models/v_knife.mdl");
+  if (probe.ok) await Promise.all(Object.entries(GSV).map(async ([id, n]) => {
+    try { const r = n === "knife" ? probe : await fetch(`goldsrc/models/v_${n}.mdl`); if (r.ok) GSMDL[id] = parseMDL(await r.arrayBuffer()); }
+    catch (e){ console.warn("v_" + n + ".mdl", e); }
+  }));
+} catch {}
+const GSWM = {};      // súng nằm trên đất: w_*.mdl
+if (GSMDL.knife) await Promise.all(Object.entries(GSV).filter(([id]) => id !== "knife").map(async ([id, n]) => {
+  try { const r = await fetch(`goldsrc/models/w_${n}.mdl`); if (r.ok) GSWM[id] = parseMDL(await r.arrayBuffer()); } catch (e){ console.warn("w_" + n + ".mdl", e); }
+}));
 const eachMat = (o, fn) => (Array.isArray(o.material) ? o.material : [o.material]).forEach(fn);
 
 function buildPistol(lod){
@@ -1278,25 +1815,11 @@ function handFore(){
   cap(h, m, -.004, -.024, .034, -.03, -.045, .09, .031);
   return h;
 }
-// cls: nhóm hành vi (rifle / pistol / shotgun / knife / nade) · slot: ô 1 súng chính, 2 súng lục, 3 dao, 4 lựu đạn · price / clipCost: giá mua
-const WEAPONS = [
-  { id: "rifle", cls: "rifle", snd: "rifle", slot: 1, price: 2500, clipCost: 80, name: "VK-47 · SÚNG TRƯỜNG", build: buildRifle, auto: true, delay: .098, dmg: 31, head: 3.6, pellets: 1, clip: 30, reserve: 90, reload: 2.4,
-    spread: { base: .0016, inc: .0021, move: .028, air: .06 }, recoil: { v: .0165, h: .0085, max: .17, rec: 7 }, kick: { z: .045, rx: .075, bolt: .05 }, hip: [.125, -.15, -.33], tracer: .7 },
-  { id: "pistol", cls: "pistol", snd: "pistol", slot: 2, price: 400, clipCost: 20, name: "P9 · SÚNG LỤC", build: buildPistol, auto: false, delay: .13, dmg: 27, head: 3.2, pellets: 1, clip: 13, reserve: 52, reload: 1.7,
-    spread: { base: .0035, inc: .006, move: .016, air: .05 }, recoil: { v: .03, h: .006, max: .14, rec: 11 }, kick: { z: .03, rx: .22, bolt: .035 }, hip: [.085, -.095, -.33], tracer: .4 },
-  { id: "shotgun", cls: "shotgun", snd: "shotgun", slot: 1, price: 1700, clipCost: 65, name: "M12 · SHOTGUN", build: buildShotgun, auto: false, delay: .85, dmg: 15, head: 1.8, pellets: 8, clip: 7, reserve: 28, reload: 2.8,
-    spread: { base: .042, inc: 0, move: .01, air: .02 }, recoil: { v: .085, h: .02, max: .25, rec: 5.5 }, kick: { z: .09, rx: .2, bolt: .075 }, hip: [.125, -.14, -.33], tracer: .35 },
-  { id: "smg", cls: "rifle", snd: "smg", slot: 1, price: 1500, clipCost: 40, name: "MP-9K · TIỂU LIÊN", build: buildSMG, auto: true, delay: .072, dmg: 22, head: 3.2, pellets: 1, clip: 30, reserve: 120, reload: 2.1,
-    spread: { base: .003, inc: .0016, move: .014, air: .04 }, recoil: { v: .0095, h: .006, max: .12, rec: 9 }, kick: { z: .03, rx: .05, bolt: .03 }, hip: [.12, -.135, -.3], tracer: .5 },
-  { id: "sniper", cls: "rifle", snd: "sniper", slot: 1, price: 4750, clipCost: 125, name: "SR-338 · BẮN TỈA", build: buildSniper, auto: false, delay: 1.35, dmg: 115, head: 4, pellets: 1, clip: 10, reserve: 30, reload: 3,
-    spread: { base: .03, inc: 0, move: .06, air: .1 }, adsSpread: .01, adsFov: 16, adsSens: .25, recoil: { v: .09, h: .01, max: .3, rec: 4 }, kick: { z: .1, rx: .16, bolt: 0 }, hip: [.125, -.15, -.33], tracer: 1 },
-  { id: "deagle", cls: "pistol", snd: "deagle", slot: 2, price: 650, clipCost: 40, name: "ĐẠI BÀNG .50", build: buildDeagle, auto: false, delay: .26, dmg: 54, head: 3.4, pellets: 1, clip: 7, reserve: 35, reload: 2,
-    spread: { base: .004, inc: .012, move: .03, air: .07 }, recoil: { v: .055, h: .012, max: .2, rec: 8 }, kick: { z: .05, rx: .34, bolt: .04 }, hip: [.085, -.095, -.33], tracer: .5 },
-  { id: "knife", cls: "knife", slot: 3, name: "DAO", build: buildKnife, auto: false, delay: .5, dmg: 55, head: 2, pellets: 0, clip: 1, reserve: 0, reload: 1, canAds: false, tilt: 0,
-    spread: { base: .001, inc: 0, move: 0, air: 0 }, recoil: { v: 0, h: 0, max: 1, rec: 9 }, kick: { z: 0, rx: 0, bolt: 0 }, hip: [.15, -.08, -.32], tracer: 0 },
-  { id: "grenade", cls: "nade", slot: 4, price: 300, name: "LỰU ĐẠN NỔ", build: buildGrenade, auto: false, delay: .8, dmg: 130, head: 1, pellets: 0, clip: 1, reserve: 0, reload: 1, canAds: false,
-    spread: { base: .001, inc: 0, move: 0, air: 0 }, recoil: { v: 0, h: 0, max: 1, rec: 9 }, kick: { z: 0, rx: 0, bolt: 0 }, hip: [.14, -.1, -.3], tracer: 0 },
-];
+// Số liệu nằm ở assets/weapons.js. build gắn model procedural theo mesh.
+const BUILD = { rifle: buildRifle, m4: buildM4, m249: buildM249, pistol: buildPistol,
+  usp: buildUSP, p228: buildP228, fiveseven: buildFiveseven, elite: buildElite, mac10: buildMAC10, tmp: buildTMP, ump45: buildUMP, p90: buildP90,
+  galil: buildGalil, sg552: buildSG552, aug: buildAUG, famas: buildFAMAS, scout: buildScout, sg550: buildSG550, g3sg1: buildG3SG1, xm1014: buildXM1014, shotgun: buildShotgun, smg: buildSMG, sniper: buildSniper, deagle: buildDeagle, knife: buildKnife, grenade: buildGrenade };
+const WEAPONS = WEAPON_CATALOG.map(w => ({ ...w, build: BUILD[w.mesh] }));
 const IDX = Object.fromEntries(WEAPONS.map((w, i) => [w.id, i]));
 function setLimb(mesh, a, b){ _d.subVectors(b, a); const l = _d.length(); mesh.position.addVectors(a, b).multiplyScalar(.5); mesh.quaternion.setFromUnitVectors(UP, _d.divideScalar(l || 1)); mesh.scale.y = l; }
 
@@ -1315,10 +1838,14 @@ function makeFlash(){
 // Gốc toạ độ của root = đường ngắm của khẩu súng gốc trong rig. org = [x, y] của "đỉnh báng cầm" trong toạ độ rig.
 const RIGS = { akm: { mesh: "AKM_model", len: .88, org: [-2.73, .98], hip: [.1, -.075, .16], adsZ: .12, bones: ["Root", "Magazine", "Bolt"] },
                glock: { mesh: "Glock19", len: .19, org: [1.34, .907], hip: [.07, -.07, -.3], adsZ: -.26, bones: ["Root", "Magazine", "Slide"] } };
-const VMGL = { rifle: { rig: "akm" }, pistol: { rig: "glock", own: true, bore: .014 }, smg: { rig: "akm", hip: [.115, -.085, .16] }, sniper: { rig: "akm", hip: [.125, -.11, .08] }, shotgun: { rig: "akm", hip: [.115, -.085, .14] },
+const VMGL = { rifle: { rig: "akm" }, m4: { rig: "akm" }, m249: { rig: "akm", hip: [.12, -.09, .14] },
+               usp: { rig: "glock", hip: [.08, -.075, -.32] }, p228: { rig: "glock", hip: [.08, -.075, -.32] }, fiveseven: { rig: "glock", hip: [.08, -.075, -.32] }, elite: { rig: "glock", hip: [.08, -.075, -.32] },
+               mac10: { rig: "akm", hip: [.115, -.085, .2] }, tmp: { rig: "akm", hip: [.115, -.085, .18] }, ump45: { rig: "akm", hip: [.115, -.085, .16] }, p90: { rig: "akm", hip: [.115, -.085, .18] },
+               galil: { rig: "akm" }, sg552: { rig: "akm" }, aug: { rig: "akm", hip: [.1, -.075, .08] }, famas: { rig: "akm", hip: [.1, -.075, .08] },
+               scout: { rig: "akm", hip: [.125, -.11, .08] }, sg550: { rig: "akm", hip: [.125, -.11, .08] }, g3sg1: { rig: "akm", hip: [.125, -.11, .08] }, xm1014: { rig: "akm", hip: [.115, -.085, .14] }, pistol: { rig: "glock", own: true, bore: .014 }, smg: { rig: "akm", hip: [.115, -.085, .16] }, sniper: { rig: "akm", hip: [.125, -.11, .08] }, shotgun: { rig: "akm", hip: [.115, -.085, .14] },
                deagle: { rig: "glock", hip: [.08, -.075, -.32] }, knife: { rig: "glock", oneHand: true, hip: [.1, -.085, -.32] }, grenade: { rig: "glock", oneHand: true, hip: [.11, -.1, -.34] } };
 function makeVmGL(w){
-  const v = VMGL[w.id], c = RIGS[v.rig], src = MODELS[v.rig];
+  const v = VMGL[w.mesh] || VMGL[w.id], c = RIGS[v.rig], src = MODELS[v.rig];
   if (!src.tuned){ src.tuned = true;   // vật liệu dùng chung giữa các bản sao nên chỉ chỉnh một lần
     src.scene.traverse(o => { if (o.isMesh) eachMat(o, m => { const metal = /Metal|Slide|Black|Gray|Frame|Magazine/.test(m.name); m.envMap = envTex; m.envMapIntensity = metal ? .55 : .12; m.metalness = metal ? .8 : 0; m.roughness = metal ? .45 : .7; if (metal || m.name === "DarkPlastic") m.color.multiplyScalar(.4);
       if (m.name === "Shirt"){ m.color.set(0x4a6f9e); m.roughness = .95; m.envMapIntensity = 0; } if (m.name === "Glove") m.color.set(0x1c1e1c); if (m.name === "Wood") m.color.set(0x7a3f1f); if (m.name === "BakeliteMag") m.color.set(0x8a3a18); }); }); }
@@ -1347,8 +1874,48 @@ function makeVmGL(w){
   w.hip = v.hip || c.hip; root.visible = false; vmScene.add(root);
   return { gl: true, root, gun, P, flash, mixer, play, adsZ: c.adsZ, bb, sc, hip: w.hip, hideL: v.oneHand ? obj.getObjectByName("UpperArmL") : null };
 }
+// view-model CS 1.6: dùng nguyên hoạt cảnh của model (idle / shoot / reload / draw), tiếng thay đạn lấy từ sự kiện 5004
+function makeVmGS(w, data){
+  const m = new MDLModel(data, { mirror: true }), root = new THREE.Group(); root.add(m.root);
+  const unsil = w.id === "usp" || w.id === "m4a1", names = data.seqs.map(s => s.pose ? s.name.toLowerCase() : "");
+  const all = re => names.map((n, i) => re.test(n) ? i : -1).filter(i => i >= 0);
+  const one = (...res) => { for (const re of res){ const i = names.findIndex(n => re.test(n)); if (i >= 0) return i; } return -1; };
+  const sil = n => unsil ? n.endsWith("_unsil") : !n.endsWith("_unsil");
+  const idle = unsil ? one(/^idle_unsil$/, /^idle/) : one(/^idle1?$/, /^idle/);
+  const draw = unsil ? one(/^draw_unsil$/, /^draw/) : one(/^draw$/, /^draw/, /^deploy/);
+  const reload = unsil ? one(/^reload_unsil$/) : one(/^reload$/, /^reload/);
+  const shotgun = { start: one(/^start_reload/), insert: one(/^insert/), after: one(/^after_reload/) };
+  let shoots = w.cls === "knife" ? all(/^midslash/) : w.cls === "nade" ? all(/^throw/) : all(/^shoot/).filter(i => sil(names[i]) && !/empty|last/.test(names[i]));
+  const empty = all(/^shoot.*(empty|last)/).filter(i => sil(names[i]));
+  const left = shoots.filter(i => /left/.test(names[i])), right = shoots.filter(i => /right/.test(names[i]));
+  if (!shoots.length) shoots = [idle];
+  let shotN = 0;
+  const toIdle = [[idle, { loop: true }]];
+  const play = (name, dur, n = 0) => {
+    if (name === "Idle") m.play(idle, { loop: true });
+    else if (name === "Draw") m.play(draw >= 0 ? draw : idle, { then: toIdle });
+    else if (name === "Shoot"){
+      const list = left.length && right.length ? (shotN++ & 1 ? right : left) : shoots;
+      m.play(n && empty.length ? empty[0] : list[Math.random() * list.length | 0], { then: toIdle });
+    } else if (name === "Reload"){
+      if (shotgun.start >= 0 && shotgun.insert >= 0){
+        const k = Math.max(1, n), nat = m.length(shotgun.start) + k * m.length(shotgun.insert) + m.length(shotgun.after), f = (dur || nat) / nat;
+        m.play(shotgun.start, { dur: m.length(shotgun.start) * f, then: [...Array(k).fill([shotgun.insert, { dur: m.length(shotgun.insert) * f }]), [shotgun.after, { dur: m.length(shotgun.after) * f }], ...toIdle] });
+      } else m.play(reload >= 0 ? reload : idle, { dur, then: toIdle });
+    }
+  };
+  for (const s of data.seqs) for (const e of s.events) if (e.event === 5004) preloadPath(e.options);
+  m.onEvent = e => { if (e.event === 5004) playPath(e.options, .6); };
+  const flash = makeFlash(); root.add(flash);
+  const P = { sightY: 0, muzzle: new V3(0, 0, -.7) };
+  const syncMuzzle = () => { root.updateMatrixWorld(true); const a = m.attachmentWorld(left.length && right.length && !(shotN & 1) ? 1 : 0); if (a){ root.worldToLocal(a); P.muzzle.copy(a); flash.position.copy(a); } };
+  play("Idle"); syncMuzzle();
+  w.hip = [0, 0, 0]; root.visible = false; vmScene.add(root);
+  return { gl: true, gs: true, root, gun: root, P, flash, play, adsZ: 0, hip: w.hip, model: m, mixer: { update: dt => { m.update(dt); syncMuzzle(); } } };
+}
 const vm = WEAPONS.map(w => {
-  if (GL && VMGL[w.id]) return makeVmGL(w);
+  if (GSMDL[w.id]) return makeVmGS(w, GSMDL[w.id]);
+  if (GL && (VMGL[w.mesh] || VMGL[w.id])) return makeVmGL(w);
   const root = new THREE.Group(), gun = w.build(false), P = gun.userData; root.add(gun);
   const arm = (hand) => { const s = new THREE.Mesh(new THREE.CylinderGeometry(.037, .052, 1, 12), sleeveMat);
     const cuff = new THREE.Mesh(new THREE.CylinderGeometry(.04, .042, .035, 12), gm.pad); root.add(s, hand, cuff); return { s, h: hand, cuff }; };
@@ -1438,7 +2005,8 @@ function poseGL(s, dt, speed, aimT, pitch, dead, strafe){
     s.gunPivot.updateWorldMatrix(true, false);
     const P = s.gun.userData, k = s.gun.scale.x;
     ikArm(s.armR, s.gunPivot.localToWorld(_g1.set(-P.gripR.x * k, (P.gripR.y - .01) * k, -(P.gripR.z + .03) * k)), _pl.set(-.7, -1, -.35).applyQuaternion(s.root.quaternion));
-    ikArm(s.armL, s.gunPivot.localToWorld(_g1.set(.012, -.02 * k, .25 * k)), _pl.set(.55, -1, .1).applyQuaternion(s.root.quaternion));
+    const lz = WEAPONS[s.gunWi]?.slot === 2 ? -(P.gripR.z - .02) * k : .25 * k;      // súng lục: tay trái ôm báng cầm
+    ikArm(s.armL, s.gunPivot.localToWorld(_g1.set(.012, (WEAPONS[s.gunWi]?.slot === 2 ? P.gripR.y - .02 : -.02) * k, lz)), _pl.set(.55, -1, .1).applyQuaternion(s.root.quaternion));
   }
   s.headBone.getWorldPosition(_b); s.root.worldToLocal(_b); s.headHit.position.set(_b.x, _b.y + .08, _b.z);
 }
@@ -1546,7 +2114,7 @@ const OPT = { mode: "dm", team: 0, dmTarget: 30, rounds: 8 };
 try { const sv = JSON.parse(localStorage.getItem("campus-strike-match") || "null"); if (sv){ if (["dm", "hostage", "bomb"].includes(sv.mode)) OPT.mode = sv.mode; if (sv.team === 0 || sv.team === 1) OPT.team = sv.team;
   if (sv.dmTarget >= 1) OPT.dmTarget = Math.min(500, sv.dmTarget | 0); if (sv.rounds >= 1) OPT.rounds = Math.min(30, sv.rounds | 0); } } catch {}
 let MODE = OPT.mode, PT = OPT.team;          // chế độ đang chơi, đội của người chơi (0 xanh = CT, 1 đỏ = T)
-const SPAWN = [[[-8, 30.5], [8, 30.5], [-4, 32], [4, 32], [0, 29.5], [-13, 32], [13, 32]], [[-14, -33], [14, -33], [-6, -34], [6, -34], [22, -32.5], [-22, -32.5], [30, -30], [-30, -31]]];
+const SPAWN = [[[-8, 30.5], [8, 30.5], [-4, 32], [4, 32], [0, 29.5], [-13, 32], [13, 32]], [[-14, -100], [14, -100], [-6, -102], [6, -102], [-22, -108], [22, -108], [-6, -108], [6, -108]]];
 const player = { isPlayer: true, name: "Bạn", team: 0, pos: new V3(), vel: new V3(), vy: 0, onGround: true, radius: .38, height: 1.75, health: 100, alive: true, eye: 1.62, crouch: 0, kills: 0, deaths: 0, speed: 0, lastHurt: 99 };
 let yaw = 0, pitch = 0, eyeY = 1.62, deathT = 0;
 const keys = new Set();
@@ -1555,9 +2123,10 @@ let locked = false, started = false, fireHeld = false, ads = false, firePressed 
 function spawnPlayer(keep = false, spot = -1){
   const sp = SPAWN[PT], s = sp[spot >= 0 ? spot % sp.length : Math.random() * sp.length | 0]; player.pos.set(s[0], 0, s[1]); player.vel.set(0, 0, 0); player.vy = 0; player.onGround = true;
   player.health = 100; player.alive = true; player.lastHurt = 99; yaw = PT ? Math.PI : 0; pitch = 0; eyeY = 1.62; recoil.p = recoil.y = recoil.tp = recoil.ty = 0; camera.rotation.z = 0; deathT = 0;
-  if (!keep){   // như CS: chết là mất hết súng — hồi sinh chỉ còn súng lục P9 và dao
-    wst.forEach((s2, i) => { s2.clip = WEAPONS[i].clip; s2.reserve = WEAPONS[i].reserve; }); inv[1] = null; inv[2] = IDX.pistol; inv[3] = IDX.knife; inv[4] = null; nades = 0; armor = 0;
-    cur = IDX.pistol; lastW = IDX.knife;
+  if (!keep){   // như CS: chết là mất hết — hồi sinh còn súng lục đầu trận (Glock 18 cho T, USP cho CT) và dao
+    wst.forEach((s2, i) => { s2.clip = WEAPONS[i].clip; s2.reserve = WEAPONS[i].reserve; }); inv[1] = null; inv[2] = sidearm(); inv[3] = IDX.knife; inv[4] = null;
+    gren.he = gren.flash = gren.smoke = 0; armor = 0; helmet = false; defuseKit = false; nv = false; flashLeft = 0; $("nv").classList.remove("on"); $("flash").style.opacity = "0";
+    cur = inv[2]; lastW = IDX.knife;
   }
   vm.forEach(v => { v.root.visible = false; }); pending = -1; switchT = 0; reloadT = 0; ads = false; closeBuy(); vm[cur].root.visible = true; $("msg").textContent = ""; hudAmmo(); hudHp();
 }
@@ -1579,12 +2148,14 @@ function keyName(c){
 
 // ---------- trạng thái súng + ĐỘ GIẬT
 const wst = WEAPONS.map(w => ({ clip: w.clip, reserve: w.reserve }));
-const START_MONEY = 2500, ROUND_START_MONEY = 800, KILL_MONEY = 300, MAX_MONEY = 16000;
-const inv = { 1: null, 2: IDX.pistol, 3: IDX.knife, 4: null }; let money = START_MONEY, armor = 0, nades = 0, noticeT = 0, noticeTxt = "";
+const START_MONEY = 2500, ROUND_START_MONEY = 1000, MIN_ROUND_MONEY = 1000, KILL_MONEY = 300, MAX_MONEY = 16000;
+const sidearm = () => IDX[PT === 1 ? "glock" : "usp"];
+const gren = { he: 0, flash: 0, smoke: 0 };
+const inv = { 1: null, 2: sidearm(), 3: IDX.knife, 4: null }; let money = START_MONEY, armor = 0, helmet = false, defuseKit = false, nv = false, flashLeft = 0, noticeT = 0, noticeTxt = "";
 const owned = i => i != null && Object.values(inv).includes(i);
 const notice = t => { noticeTxt = t; noticeT = 1.8; };
 const addMoney = n => { money = clamp(money + n, 0, MAX_MONEY); hudAmmo(); };
-let cur = IDX.pistol, pending = -1, switchT = 0, fireCd = 0, reloadT = 0, sinceShot = 9, shotsF = 0, boltT = 0, pumpT = 0, flashT = 0, adsK = 0;
+let cur = sidearm(), pending = -1, switchT = 0, fireCd = 0, reloadT = 0, sinceShot = 9, shotsF = 0, boltT = 0, pumpT = 0, flashT = 0, adsK = 0;
 const recoil = { p: 0, y: 0, tp: 0, ty: 0 };                       // góc giật camera hiện tại / mục tiêu
 const kick = { z: 0, zv: 0, rx: 0, rxv: 0, rz: 0, rzv: 0, y: 0, yv: 0 };   // lò xo view-model
 const sway = { x: 0, y: 0 }; let bobT = 0, bobAmp = 0, stepAcc = 0, reloadCues = [], reloadStep = 0;
@@ -1596,7 +2167,7 @@ function currentSpread(){
 }
 function startReload(){
   const w = W(), s = wst[cur]; if (w.cls === "knife" || w.cls === "nade" || reloadT > 0 || switchT > 0 || s.clip >= w.clip || s.reserve <= 0 || !player.alive) return;
-  reloadT = w.reload; ads = false; reloadStep = 0; if (vm[cur].gl) vm[cur].play("Reload", w.reload);
+  reloadT = w.reload; ads = false; reloadStep = 0; if (vm[cur].gl) vm[cur].play("Reload", w.reload, Math.min(w.clip - s.clip, s.reserve));
   reloadCues = w.cls === "shotgun" ? [.2, .34, .48, .62, .76, .9] : w.cls === "rifle" ? [.24, .66, .88, .92] : [.22, .68, .9];
 }
 let lastW = IDX.knife;
@@ -1625,16 +2196,16 @@ function fire(){
   recoil.ty += rc.h * ((swayAt(n + 1) - swayAt(n)) * 4.2 + R(-.35, .35));
   // --- giật view-model (lò xo)
   kick.zv += w.kick.z * 60; kick.rxv += w.kick.rx * 55; kick.rzv += R(-1, 1) * w.kick.rx * 26; kick.yv += w.kick.z * 9;
-  shotsF = n + 1; sinceShot = 0; boltT = 1; flashT = .055; if (vm[cur].gl) vm[cur].play("Shoot"); if (w.cls === "shotgun") pumpT = .62;
+  shotsF = n + 1; sinceShot = 0; boltT = 1; flashT = .055; if (vm[cur].gl) vm[cur].play("Shoot", 0, s.clip === 0); if (w.cls === "shotgun") pumpT = .62;
   vm[cur].flash.visible = true; vm[cur].flash.rotation.z = Math.random() * 6; vm[cur].flash.scale.setScalar(w.cls === "shotgun" ? 1.5 : w.cls === "pistol" ? .75 : R(.9, 1.25));
   worldFlash.position.copy(o).addScaledVector(f, .8); worldFlash.intensity = 10; vmFlashLight.intensity = 3; vmFlashLight.position.set(.1, -.05, -.9);
   if (w.cls !== "shotgun") spawnCasing(o, f, r, u);
-  sfx.shot(w.snd, .9, .12);
+  sfx.shot(w.snd, .9, .12, w.id);
 }
 const raycaster = new THREE.Raycaster(); let enemyHit = [];
 function hitMark(head){ const hm = $("hitm"); hm.classList.remove("show", "head"); void hm.offsetWidth; hm.classList.add("show"); if (head) hm.classList.add("head"); sfx.hit(head); }
 function knifeAttack(w){
-  fireCd = w.delay; kick.zv -= 5.5; kick.rzv += 9; kick.rxv -= 3; sfx.slash();
+  fireCd = w.delay; kick.zv -= 5.5; kick.rzv += 9; kick.rxv -= 3; sfx.slash(); if (vm[cur].gs) vm[cur].play("Shoot");
   camera.updateMatrixWorld(); const o = camera.getWorldPosition(new V3()), f = camera.getWorldDirection(new V3());
   const wall = rayBoxes(o.x, o.y, o.z, f.x, f.y, f.z, 2.3); raycaster.set(o, f); raycaster.far = wall ? wall.t : 2.3;
   const h = raycaster.intersectObjects(enemyHit, false).find(x => x.object.userData.bot.alive);
@@ -1644,11 +2215,12 @@ function knifeAttack(w){
 const liveNades = [], nadePool = [];
 { const gg = new THREE.SphereGeometry(.05, 10, 8), gmn = M({ color: 0x3d4a2c, roughness: .7 }); for (let i = 0; i < 4; i++){ const m = new THREE.Mesh(gg, gmn); m.scale.y = 1.2; m.castShadow = true; m.visible = false; scene.add(m); nadePool.push(m); } }
 function throwNade(w){
-  if (nades <= 0) return; nades--; fireCd = w.delay; kick.zv -= 6; kick.rxv -= 6;
+  const k = w.kind || "he"; if ((gren[k] || 0) <= 0) return; gren[k]--; fireCd = w.delay; kick.zv -= 6; kick.rxv -= 6; if (vm[cur].gs) vm[cur].play("Shoot");
   camera.updateMatrixWorld(); const o = camera.getWorldPosition(new V3()), f = camera.getWorldDirection(new V3());
   const m = nadePool.find(x => !x.visible) || nadePool[0]; m.position.copy(o).addScaledVector(f, .5); m.position.y -= .1; m.visible = true;
-  liveNades.push({ m, v: f.clone().multiplyScalar(17).add(new V3(player.vel.x, 3.2, player.vel.z)), t: 1.9 });
-  if (nades === 0){ inv[4] = null; switchTo(inv[1] ?? inv[2]); } hudAmmo();
+  liveNades.push({ m, v: f.clone().multiplyScalar(k === "smoke" ? 14 : 17).add(new V3(player.vel.x, 3.2, player.vel.z)), t: k === "smoke" ? 1.5 : 1.9, kind: k });
+  if (gren[k] === 0){ const next = ["he", "flash", "smoke"].find(x => gren[x] > 0); if (next){ inv[4] = IDX[next]; switchTo(IDX[next]); } else { inv[4] = null; switchTo(inv[1] ?? inv[2]); } }
+  hudAmmo();
 }
 function explode(p){
   const pd = p.distanceTo(camera.position); sfx.boom("nade", clamp(1.3 / (1 + pd * .08), .15, 1));
@@ -1660,6 +2232,28 @@ function explode(p){
     damage(a, 130 * (1 - d / 7.5) * (a.isPlayer ? .6 : 1), player, false, "grenade"); if (!a.isPlayer) blood(to, to.clone().sub(from).normalize(), a.pos.y, 8); }
   if (pd < 14){ recoil.tp += .05 * (1 - pd / 14); recoil.ty += R(-.03, .03) * (1 - pd / 14); }
 }
+function flashbang(p){
+  const from = new V3(p.x, p.y + .3, p.z), to = new V3();
+  for (const a of [player, ...bots]){ if (!a.alive) continue;
+    to.set(a.pos.x, a.pos.y + 1.4, a.pos.z); const d = from.distanceTo(to); if (d > 14 || !los(from, to)) continue;
+    const dur = 2.6 * (1 - d / 14);
+    if (a.isPlayer) flashLeft = Math.max(flashLeft, dur); else { a.flashed = Math.max(a.flashed || 0, dur); a.target = null; a.burst = 0; }
+  }
+}
+function spawnSmoke(p){
+  const g = new THREE.Group();
+  for (let i = 0; i < 7; i++){
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: texPuff, transparent: true, depthWrite: false, color: 0xc5c5c5, opacity: .55 }));
+    s.position.set(R(-1.2, 1.2), R(.15, 1.8), R(-1.2, 1.2)); s.scale.setScalar(R(2.2, 3.5)); g.add(s);
+  }
+  g.position.set(p.x, Math.max(p.y, .2), p.z); scene.add(g); smokes.push({ g, p: g.position, t: 16, r: 2.6 });
+}
+function updateSmokes(dt){
+  for (let i = smokes.length - 1; i >= 0; i--){ const s = smokes[i]; s.t -= dt;
+    if (s.t < 2) for (const c of s.g.children) c.material.opacity = .55 * Math.max(0, s.t) / 2;
+    if (s.t <= 0){ scene.remove(s.g); for (const c of s.g.children) c.material.dispose(); smokes.splice(i, 1); }
+  }
+}
 function updateNades(dt){
   for (let i = liveNades.length - 1; i >= 0; i--){ const n = liveNades[i], p = n.m.position; n.v.y -= 14 * dt;
     const sp = n.v.length(), st = sp * dt;
@@ -1668,21 +2262,34 @@ function updateNades(dt){
         n.v.x -= 1.45 * dn * hit.nx; n.v.y -= 1.45 * dn * hit.ny; n.v.z -= 1.45 * dn * hit.nz; n.v.multiplyScalar(.72); if (hit.ny > .5 && Math.abs(n.v.y) < 1.2) n.v.y = 0; if (sp > 3) sfx.bounce(clamp(sp / 18, .15, .7)); }
       else p.addScaledVector(n.v, dt); }
     if (p.y < .05){ p.y = .05; n.v.y = Math.abs(n.v.y) * .4; }
-    n.m.rotation.x += sp * dt * 3; n.t -= dt; if (n.t <= 0){ n.m.visible = false; liveNades.splice(i, 1); explode(p.clone()); } }
+    n.m.rotation.x += sp * dt * 3; n.t -= dt; if (n.t <= 0){ n.m.visible = false; liveNades.splice(i, 1); const at = p.clone(); if (n.kind === "flash") flashbang(at); else if (n.kind === "smoke") spawnSmoke(at); else explode(at); } }
 }
 // ---------- MUA ĐỒ (phím B, chỉ trong khu xuất phát) — menu số như Counter-Strike
-const SHOP = { main: [["Súng lục", "pistols"], ["Shotgun", "shotguns"], ["Tiểu liên", "smgs"], ["Súng trường", "rifles"], null, ["Đạn súng chính", "ammo1"], ["Đạn súng lục", "ammo2"], ["Trang bị", "equip"]],
-  pistols: ["pistol", "deagle"], shotguns: ["shotgun"], smgs: ["smg"], rifles: ["rifle", "sniper"], equip: ["armor", "grenade"] };
-const ARMOR_PRICE = 650; let buyOpen = null;
-const inSpawnZone = (team, p) => team ? p.z < -29 : p.z > 24 && Math.abs(p.x) < 20;   // khu xuất phát: xanh = cổng chính, đỏ = đường bắc
+const SHOP = { main: [["Súng lục", "pistols"], ["Shotgun", "shotguns"], ["Tiểu liên", "smgs"], ["Súng trường", "rifles"], ["Súng máy", "mgs"], ["Đạn súng chính", "ammo1"], ["Đạn súng lục", "ammo2"], ["Trang bị", "equip"]] };
+const catIds = cat => WEAPONS.filter(w => w.cat === cat && (w.team == null || w.team === PT)).map(w => w.id);
+const equipIds = () => ["armor", "helmet", "he", "flash", "smoke", "nvg"].concat(MODE === "bomb" && PT === 0 ? ["defuse"] : []);
+let buyOpen = null;
+const inSpawnZone = (team, p) => team ? p.z < -90 && Math.abs(p.x) < 36 : p.z > 24 && Math.abs(p.x) < 20;   // khu xuất phát: xanh = cổng chính, đỏ = quảng trường phía bắc
 const inBuyZone = () => inSpawnZone(PT, player.pos);
 const ammoCost = slot => { const i = inv[slot]; if (i == null) return -1; const w = WEAPONS[i]; return Math.ceil((w.reserve - wst[i].reserve) / w.clip) * w.clipCost; };
 function closeBuy(){ buyOpen = null; const el = $("buymenu"); if (el) el.style.display = "none"; }
+function itemRow(id){
+  if (id === "armor") return ["Kevlar", 650, money >= 650 && armor < 100];
+  if (id === "helmet") return ["Kevlar + Helmet", 1000, money >= 1000 && !(armor >= 100 && helmet)];
+  if (id === "defuse") return ["Defuse Kit", 200, money >= 200 && !defuseKit];
+  if (id === "nvg") return ["Nightvision", 1250, money >= 1250 && !nv];
+  const w = WEAPONS[IDX[id]], full = w.cls === "nade" && gren[w.kind] >= (w.max || 1);
+  const ownedGun = w.cls !== "nade" && inv[w.slot] === IDX[id];
+  return [w.name, w.price, money >= w.price && !full && !ownedGun];
+}
 function renderBuy(){
   const el = $("buymenu"), row = (n, label, price, ok = true) => `<div class="${ok ? "" : "no"}"><b>${n}.</b>${label}${price != null ? `<i>$${price}</i>` : ""}</div>`;
   let h = "";
-  if (buyOpen === "main"){ h = "<h3>MUA ĐỒ</h3>" + SHOP.main.map((m, i) => !m ? "" : m[1] === "ammo1" || m[1] === "ammo2" ? (() => { const c = ammoCost(m[1] === "ammo1" ? 1 : 2); return row(i + 1, m[0], c > 0 ? c : null, c > 0 && c <= money); })() : row(i + 1, m[0])).join(""); }
-  else { h = `<h3>${SHOP.main.find(m => m && m[1] === buyOpen)[0].toUpperCase()}</h3>` + SHOP[buyOpen].map((id, i) => id === "armor" ? row(i + 1, "Áo giáp", ARMOR_PRICE, money >= ARMOR_PRICE && armor < 100) : row(i + 1, WEAPONS[IDX[id]].name, WEAPONS[IDX[id]].price, money >= WEAPONS[IDX[id]].price && !(id === "grenade" && nades >= 1))).join(""); }
+  if (buyOpen === "main"){ h = "<h3>MUA ĐỒ</h3>" + SHOP.main.map((m, i) => m[1] === "ammo1" || m[1] === "ammo2" ? (() => { const c = ammoCost(m[1] === "ammo1" ? 1 : 2); return row(i + 1, m[0], c > 0 ? c : null, c > 0 && c <= money); })() : row(i + 1, m[0])).join(""); }
+  else {
+    const ids = buyOpen === "equip" ? equipIds() : catIds(buyOpen);
+    h = `<h3>${SHOP.main.find(m => m && m[1] === buyOpen)[0].toUpperCase()}</h3>` + ids.map((id, i) => { const [label, price, ok] = itemRow(id); return row(i + 1, label, price, ok); }).join("");
+  }
   el.innerHTML = h + row(0, buyOpen === "main" ? "Thoát" : "Quay lại"); el.style.display = "block";
 }
 function toggleBuy(){ if (MODE === "dm"){ notice("ĐẤU ĐỘI KHÔNG MUA SÚNG — ĐI TỚI SÚNG TRÊN ĐẤT RỒI NHẶT"); return; } if (buyOpen){ closeBuy(); return; } if (!player.alive) return; if (!inBuyZone()){ notice(`BẠN KHÔNG Ở KHU MUA (${PT ? "ĐƯỜNG BẮC" : "CỔNG CHÍNH"})`); return; } buyOpen = "main"; renderBuy(); }
@@ -1693,14 +2300,18 @@ function buyKey(n){
     if (m[1] === "ammo1" || m[1] === "ammo2"){ const slot = m[1] === "ammo1" ? 1 : 2, c = ammoCost(slot);
       if (c < 0) notice("CHƯA CÓ SÚNG Ở Ô NÀY"); else if (c === 0) notice("ĐẠN ĐÃ ĐẦY"); else if (c > money) notice("KHÔNG ĐỦ TIỀN"); else { wst[inv[slot]].reserve = WEAPONS[inv[slot]].reserve; addMoney(-c); sfx.click(0, .5); } renderBuy(); return; }
     buyOpen = m[1]; renderBuy(); return; }
-  const id = SHOP[buyOpen][n - 1]; if (!id) return;
-  if (id === "armor"){ if (armor >= 100) notice("GIÁP ĐÃ ĐẦY"); else if (money < ARMOR_PRICE) notice("KHÔNG ĐỦ TIỀN"); else { armor = 100; addMoney(-ARMOR_PRICE); hudHp(); sfx.click(0, .5); closeBuy(); } return; }
+  const id = (buyOpen === "equip" ? equipIds() : catIds(buyOpen))[n - 1]; if (!id) return;
+  if (id === "armor"){ if (armor >= 100) notice("GIÁP ĐÃ ĐẦY"); else if (money < 650) notice("KHÔNG ĐỦ TIỀN"); else { armor = 100; addMoney(-650); hudHp(); sfx.click(0, .5); closeBuy(); } return; }
+  if (id === "helmet"){ if (armor >= 100 && helmet) notice("GIÁP VÀ MŨ ĐÃ ĐẦY"); else if (money < 1000) notice("KHÔNG ĐỦ TIỀN"); else { armor = 100; helmet = true; addMoney(-1000); hudHp(); sfx.click(0, .5); closeBuy(); } return; }
+  if (id === "defuse"){ if (defuseKit) notice("ĐÃ CÓ BỘ GỠ BOM"); else if (money < 200) notice("KHÔNG ĐỦ TIỀN"); else { defuseKit = true; addMoney(-200); sfx.click(0, .5); closeBuy(); } return; }
+  if (id === "nvg"){ if (nv) notice("ĐANG BẬT KÍNH ĐÊM"); else if (money < 1250) notice("KHÔNG ĐỦ TIỀN"); else { nv = true; $("nv").classList.add("on"); addMoney(-1250); sfx.click(0, .5); closeBuy(); } return; }
   const i = IDX[id], w = WEAPONS[i];
-  if (id === "grenade" && nades >= 1){ notice("CHỈ MANG ĐƯỢC 1 LỰU ĐẠN"); return; }
-  if (id !== "grenade" && inv[w.slot] === i){ notice("BẠN ĐANG CÓ SÚNG NÀY"); return; }
+  if (w.team != null && w.team !== PT){ notice(w.team ? "CHỈ KHỦNG BỐ MUA ĐƯỢC" : "CHỈ CẢNH SÁT MUA ĐƯỢC"); return; }
+  if (w.cls === "nade" && gren[w.kind] >= (w.max || 1)){ notice("ĐÃ ĐỦ SỐ LƯỢNG"); return; }
+  if (w.cls !== "nade" && inv[w.slot] === i){ notice("BẠN ĐANG CÓ SÚNG NÀY"); return; }
   if (money < w.price){ notice("KHÔNG ĐỦ TIỀN"); return; }
   addMoney(-w.price); sfx.click(0, .5); sfx.click(.12, .5);
-  if (id === "grenade"){ nades = 1; inv[4] = i; hudAmmo(); closeBuy(); return; }
+  if (w.cls === "nade"){ gren[w.kind] = Math.min(w.max || 1, gren[w.kind] + 1); inv[4] = i; if (cur !== i) switchTo(i); hudAmmo(); closeBuy(); return; }
   const wasCur = inv[w.slot] === cur; inv[w.slot] = i; wst[i].clip = w.clip; wst[i].reserve = w.reserve;
   if (wasCur){ vm[cur].root.visible = false; cur = i; vm[cur].root.visible = true; if (vm[cur].gl) vm[cur].play("Idle"); reloadT = 0; pending = -1; switchT = 0; hudAmmo(); } else switchTo(i);
   closeBuy(); hudAmmo();
@@ -1713,7 +2324,9 @@ function playerRay(o, d, w, muz, tracer){
   const end = new V3(); let res = 0;
   if (h){
     end.copy(h.point); const bot = h.object.userData.bot, part = h.object.userData.hit;
-    let dmg = w.dmg * (part === "head" ? w.head : part === "limb" ? .75 : 1) * clamp(1.05 - h.distance / (w.cls === "shotgun" ? 26 : 140), .25, 1);
+    const sg = w.cat === "shotguns", range = sg ? 26 : w.cat === "rifles" || w.cat === "mgs" ? 420 : 220;
+    let dmg = w.dmg * (part === "head" ? w.head : part === "limb" ? .75 : 1) * clamp(1.05 - h.distance / range, sg ? .25 : .6, 1);
+    if (part === "head" && (w.cat === "rifles" || w.cat === "mgs" || w.id === "deagle")) dmg = Math.max(dmg, 120);   // như CS 1.6: súng trường / Deagle trúng đầu là chết
     damage(bot, dmg, player, part === "head", w.id); blood(end, d, bot.pos.y, part === "head" ? 14 : 9); res = part === "head" ? 2 : 1;
   } else if (wall){ end.copy(o).addScaledVector(d, maxT); bulletHole(end, wn); puff(end, 0xcfc6b4, .3, 2); sfx.impact(clamp(1 - maxT / 40, 0, 1), 0); }
   else end.copy(o).addScaledVector(d, 300);
@@ -1778,12 +2391,39 @@ function makeBot(team, i){
   const b = { team, name: TEAM[team].names[i], pos: new V3(), vy: 0, onGround: true, radius: .4, height: 1.75, hp: 100, alive: true, yaw: 0, pitch: 0, speed: 0,
     target: null, senseT: Math.random() * .2, react: 0, burst: 0, fireT: 0, clip: 30, reloadT: 0, strafe: 0, strafeT: 0, path: [], stuckT: 0, lastPos: new V3(), deadT: 0,
     lastSeen: null, skill: R(.8, 1.1), shotAgo: 9, kills: 0, deaths: 0, lookYaw: null, fallDir: 1,
-    goalPt: null, campAfter: 0, waitT: 0, waitYaw: 0, rescuer: false, siteIdx: 0 };   // mục tiêu theo chế độ (botObjective / objGoal)
-  b.model = makeSoldier(team, b); respawnBot(b); return b;
+    goalPt: null, campAfter: 0, waitT: 0, waitYaw: 0, rescuer: false, siteIdx: 0,   // mục tiêu theo chế độ (botObjective / objGoal)
+    wi: null, money: ROUND_START_MONEY, armor: 0, helmet: false };
+  b.model = makeSoldier(team, b); setBotGun(b, botSide(b)); respawnBot(b); return b;
 }
+// ---------- súng và tiền của bot: chế độ theo vòng thì bot cũng bắt đầu với $800 và tự mua như người chơi
+const botSide = b => IDX[b.team ? "glock" : "usp"];
+function setBotGun(b, wi){
+  b.wi = wi; b.clip = WEAPONS[wi].clip; b.reloadT = 0;
+  const s = b.model; if (s.gunWi === wi) return; s.gunWi = wi;
+  const k = s.gl ? .85 : 1;
+  if (s.gun){ s.gunPivot.remove(s.gun); s.gun.traverse(o => { if (o.isMesh){ o.geometry.dispose(); if (!sharedMats.has(o.material)) o.material.dispose?.(); } }); }
+  s.gun = WEAPONS[wi].build(true); s.gun.rotation.y = Math.PI; s.gun.scale.setScalar(k); s.gun.traverse(o => { if (o.isMesh) o.castShadow = true; }); s.gunPivot.add(s.gun);
+  const mz = s.gun.userData.muzzle; if (mz) s.flash.position.set(0, mz.y * k, -mz.z * k);
+}
+function botBuy(b){
+  const T = b.team, price = id => WEAPONS[IDX[id]].price, buy = id => { b.money -= price(id); setBotGun(b, IDX[id]); };
+  if (WEAPONS[b.wi].slot !== 1){
+    const kit = b.money > 3600 ? 650 : 0;                                       // dư tiền thì chừa lại tiền giáp
+    const rifle = (T ? ["ak47", "galil"] : ["m4a1", "famas"]).find(id => b.money >= price(id) + kit);
+    const smg = (T ? ["mac10", "ump45"] : ["mp5", "tmp", "ump45"]).find(id => b.money >= price(id) + 650);
+    if (b.money >= 5400 && Math.random() < .15) buy("awp");
+    else if (rifle) buy(rifle);
+    else if (smg && Math.random() < .6) buy(smg);
+    else if (b.wi === botSide(b) && b.money >= 650 && Math.random() < .35) buy("deagle");
+  }
+  if (b.armor < 100 && b.money >= 650){ b.money -= 650; b.armor = 100; }
+  if (!b.helmet && b.money >= 2350){ b.money -= 350; b.helmet = true; }
+}
+const botPay = (b, v) => { b.money = clamp(b.money + v, 0, MAX_MONEY); };
 function respawnBot(b, spot = -1){
   const sp = SPAWN[b.team]; const s = sp[spot >= 0 ? spot % sp.length : Math.random() * sp.length | 0];
-  b.pos.set(s[0] + R(-.5, .5), 0, s[1] + R(-.5, .5)); b.hp = 100; b.alive = true; b.target = null; b.path = []; b.clip = 30; b.reloadT = 0; b.deadT = 0; b.vy = 0; b.onGround = true;
+  b.pos.set(s[0] + R(-.5, .5), 0, s[1] + R(-.5, .5)); b.hp = 100; b.alive = true; b.target = null; b.path = [];
+  if (MODE === "dm"){ setBotGun(b, botSide(b)); b.armor = 0; } b.clip = WEAPONS[b.wi].clip; b.reloadT = 0; b.deadT = 0; b.vy = 0; b.onGround = true;
   b.goalPt = null; b.goalStuck = 0; b.campAfter = 0; b.waitT = 0; b.lastSeen = null; b.lookYaw = null; b.speed = 0; b.stuckT = 0;
   b.yaw = b.team ? 0 : Math.PI; b.model.root.rotation.set(0, b.yaw, 0); b.model.root.visible = true; b.lastPos.copy(b.pos);
 }
@@ -1811,10 +2451,12 @@ function updateBot(b, dt){
     poseSoldier(m, dt, 0, 0, 0, true);
     if (b.deadT > 4.5 && MODE === "dm") respawnBot(b); return;     // chế độ theo vòng: nằm đó tới vòng sau
   }
+  if (b.flashed > 0){ b.flashed -= dt; b.target = null; b.burst = 0; }
   b.shotAgo += dt; b.senseT -= dt;
   if (b.senseT <= 0){ b.senseT = R(.1, .2); const t = pickTarget(b); if (t && t !== b.target) b.react = R(.22, .5) / b.skill; if (!t && b.target) b.lastSeen = b.target.pos.clone(); b.target = t; }
   if (b.target && !b.target.alive) b.target = null;
-  if (b.reloadT > 0){ b.reloadT -= dt; if (b.reloadT <= 0) b.clip = 30; }
+  const bw = WEAPONS[b.wi];
+  if (b.reloadT > 0){ b.reloadT -= dt; if (b.reloadT <= 0) b.clip = bw.clip; }
   const t = b.target; let aim = 0;
   if (t){
     const dx = t.pos.x - b.pos.x, dz = t.pos.z - b.pos.z, d = Math.hypot(dx, dz), want = Math.atan2(dx, dz);
@@ -1825,14 +2467,17 @@ function updateBot(b, dt){
     b.react -= dt;
     if (b.react <= 0 && b.reloadT <= 0 && angDiff(b.yaw, want) < .14){
       b.fireT -= dt;
-      if (b.fireT <= 0){ if (b.burst > 0){ botShoot(b, t, d); b.burst--; b.fireT = .105; if (b.burst === 0) b.fireT = R(.3, .75); } else b.burst = 2 + (Math.random() * 4 | 0); }
+      if (b.fireT <= 0){
+        if (b.burst > 0){ botShoot(b, t, d); b.burst--; b.fireT = Math.max(bw.delay, .1); if (b.burst === 0) b.fireT = bw.auto ? R(.3, .75) : Math.max(bw.delay, R(.25, .5)); }
+        else b.burst = bw.auto ? 2 + (Math.random() * 4 | 0) : 1;
+      }
     }
     b.path = []; b.stuckT = 0;
   } else if (MODE !== "dm" && botObjective(b, dt)){      // đứng yên: đặt / gỡ bom, chờ con tin, canh gác
     b.speed = lerp(b.speed, 0, .3); b.pitch = lerp(b.pitch, 0, .1); b.stuckT = 0; b.lastPos.copy(b.pos);
     if (b.waitT > 0) b.yaw = turnTo(b.yaw, b.waitYaw, 1.5 * dt);
     moveBody(b, 0, 0, dt);
-    if (b.clip < 20 && b.reloadT <= 0) b.reloadT = 2.2;
+    if (b.clip < bw.clip * .65 && b.reloadT <= 0) b.reloadT = bw.reload;
   } else {
     if (!b.path.length && b.goalPt && Math.hypot(b.goalPt.x - b.pos.x, b.goalPt.z - b.pos.z) < 16){       // chặng cuối: đi thẳng tới điểm đích (con tin, bom, điểm đặt bom…)
       const dx = b.goalPt.x - b.pos.x, dz = b.goalPt.z - b.pos.z, d = Math.hypot(dx, dz);
@@ -1843,6 +2488,10 @@ function updateBot(b, dt){
         const from = nearestNode(b.pos); let goal = null;
         if (b.lastSeen){ goal = nearestNode(b.lastSeen); b.lastSeen = null; b.goalPt = null; }
         else if (MODE !== "dm") goal = objGoal(b);
+        else if (bw.slot !== 1){       // đấu đội: đang cầm súng lục thì đi nhặt súng chính gần nhất
+          let f = null, fd = 60; for (const g of floorGuns) if (WEAPONS[g.wi].slot === 1){ const d = dist2(g.pos, b.pos); if (d < fd){ fd = d; f = g; } }
+          if (f){ goal = nearestNode(f.pos); b.goalPt = f.pos.clone(); }
+        }
         if (!goal){ const enemyX = b.team ? -1 : 1; let tries = 0; do { goal = nodes[Math.random() * nodes.length | 0]; } while (++tries < 4 && (goal.x - goal.z) * enemyX < -10 && Math.random() < .7); }
         b.path = [from, ...findPath(from, goal)];
       }
@@ -1852,7 +2501,7 @@ function updateBot(b, dt){
     }
     b.pitch = lerp(b.pitch, 0, .1);
     b.stuckT += dt; if (b.stuckT > 1){ if (b.pos.distanceTo(b.lastPos) < .5){ b.path = []; if (b.goalPt && ++b.goalStuck > 2){ b.goalPt = null; b.goalStuck = 0; } botMove(b, R(-.4, .4), R(-.4, .4), dt); } b.lastPos.copy(b.pos); b.stuckT = 0; b.lookYaw = null; }
-    if (b.clip < 12 && b.reloadT <= 0) b.reloadT = 2.2;
+    if (b.clip < bw.clip * .4 && b.reloadT <= 0) b.reloadT = bw.reload;
   }
   for (const o of bots) if (o !== b && o.alive){ const dx = b.pos.x - o.pos.x, dz = b.pos.z - o.pos.z, d = Math.hypot(dx, dz); if (d < .8 && d > .001){ b.pos.x += dx / d * (.8 - d) * .5; b.pos.z += dz / d * (.8 - d) * .5; } }
   m.root.position.copy(b.pos); m.root.rotation.set(0, b.yaw, 0);
@@ -1861,20 +2510,22 @@ function updateBot(b, dt){
 }
 function botShoot(b, t, d){
   const m = b.model; m.root.updateMatrixWorld(true);
-  const from = m.gunPivot.localToWorld(new V3(0, .04, m.gl ? .6 : .7));
-  const tSpeed = t.isPlayer ? player.speed : t.speed;
-  let ch = clamp(.6 - d * .0105, .08, .58) * b.skill * (tSpeed > 2.5 ? .72 : 1) * (t.isPlayer && player.crouch > .5 ? .85 : 1);
+  const from = m.gunPivot.localToWorld(m.flash.position.clone()), w = WEAPONS[b.wi];
+  const tSpeed = t.isPlayer ? player.speed : t.speed, scoped = !!w.adsFov && w.adsFov < 30;
+  let ch = clamp(.6 - d * (scoped ? .004 : w.cls === "pistol" ? .014 : .0105), .08, .58) * b.skill * (tSpeed > 2.5 ? .72 : 1) * (t.isPlayer && player.crouch > .5 ? .85 : 1);
   const hit = Math.random() < ch, aimP = new V3(t.pos.x, t.pos.y + (t.isPlayer ? 1.25 - player.crouch * .4 : 1.2), t.pos.z);
   if (!hit) aimP.add(new V3(R(-1, 1), R(-.3, .9), R(-1, 1)).normalize().multiplyScalar(R(.5, 1.3)));
   const dir = aimP.clone().sub(from).normalize(), wall = rayBoxes(from.x, from.y, from.z, dir.x, dir.y, dir.z, 200);
   let end = aimP;
-  if (hit && (!wall || wall.t > d - 1)){ const head = Math.random() < .09; damage(t, t.isPlayer ? (head ? 32 : R(9, 14)) : (head ? 80 : R(19, 27)), b, head, "rifle"); if (!t.isPlayer) blood(aimP, dir, t.pos.y, 6); }
+  if (hit && (!wall || wall.t > d - 1)){
+    const head = Math.random() < .09, base = w.dmg * (w.pellets || 1) * (w.cat === "shotguns" ? clamp(1 - d / 22, .12, 1) : 1);
+    damage(t, t.isPlayer ? base * (head ? 1.1 : R(.32, .48)) : base * (head ? 2.6 : R(.62, .87)), b, head, w.id); if (!t.isPlayer) blood(aimP, dir, t.pos.y, 6); }
   else if (wall){ end = from.clone().addScaledVector(dir, wall.t); bulletHole(end, [wall.nx, wall.ny, wall.nz]); puff(end, 0xcfc6b4, .28, 1); }
   else end = from.clone().addScaledVector(dir, 120);
   spawnTracer(from, end);
-  m.flash.visible = true; m.flashT = .05; m.flash.material.rotation = Math.random() * 6; m.kick = 1; b.clip--; b.shotAgo = 0; if (b.clip <= 0) b.reloadT = 2.2;
+  m.flash.visible = true; m.flashT = .05; m.flash.material.rotation = Math.random() * 6; m.kick = 1; b.clip--; b.shotAgo = 0; if (b.clip <= 0) b.reloadT = w.reload;
   const pd = from.distanceTo(camera.position), rx = Math.cos(yaw), rz = -Math.sin(yaw);
-  sfx.shot("rifle", clamp(1.1 / (1 + pd * .09), .04, .8), ((from.x - camera.position.x) * rx + (from.z - camera.position.z) * rz) / (pd + .1));
+  sfx.shot(w.snd, clamp(1.1 / (1 + pd * .09), .04, .8), ((from.x - camera.position.x) * rx + (from.z - camera.position.z) * rz) / (pd + .1), w.id);
 }
 
 // ============================================================================
@@ -1884,11 +2535,13 @@ const score = [0, 0]; let matchOver = 0;
 function damage(victim, dmg, attacker, head, weapon){
   if (!victim.alive || matchOver) return;
   if (victim.isPlayer){
-    if (armor > 0){ const ab = Math.min(armor, dmg * .5); armor -= ab; dmg -= ab; }
+    if (head && helmet) dmg *= .5;
+    if (armor > 0){ const ab = Math.min(armor, dmg * .5); armor -= ab; dmg -= ab; if (armor <= 0) helmet = false; }
     player.health -= dmg; player.lastHurt = 0; hudHp(); sfx.hurt(); const v = $("vig"); v.classList.add("hit"); setTimeout(() => v.classList.remove("hit"), 90);
     recoil.tp += .012; recoil.ty += R(-.012, .012);
     if (player.health <= 0){ player.alive = false; player.deaths++; deathT = 3.2; vm[cur].root.visible = false; closeBuy(); onKill(attacker, victim, head); }
   } else {
+    if (victim.armor > 0 && (!head || victim.helmet && dmg < 100)){ const ab = Math.min(victim.armor, dmg * .35); victim.armor -= ab; dmg -= ab; }
     victim.hp -= dmg; if (!victim.target){ victim.lookYaw = Math.atan2(attacker.pos.x - victim.pos.x, attacker.pos.z - victim.pos.z); victim.yaw = turnTo(victim.yaw, victim.lookYaw, 1.6); victim.senseT = 0; }
     if (victim.hp <= 0){ victim.alive = false; victim.deaths++; victim.deadT = 0; victim.speed = 0;
       const ax = attacker.pos.x - victim.pos.x, az = attacker.pos.z - victim.pos.z; victim.fallDir = (ax * Math.sin(victim.yaw) + az * Math.cos(victim.yaw)) > 0 ? 1 : -1; onKill(attacker, victim, head); }
@@ -1897,7 +2550,7 @@ function damage(victim, dmg, attacker, head, weapon){
 const teamName = t => MODE === "dm" ? "ĐỘI " + TEAM[t].name : t ? "KHỦNG BỐ" : "CẢNH SÁT";
 const bombActor = { isBomb: true, name: "BOM", team: 1, pos: new V3(), alive: true, kills: 0 };   // "kẻ tấn công" khi bom nổ
 function onKill(k, v, head){
-  if (k !== v && !k.isBomb){ k.kills++; if (MODE === "dm") score[k.team]++; if (k.isPlayer && MODE !== "dm") addMoney(KILL_MONEY); } $("sb").textContent = score[0]; $("sr").textContent = score[1]; $("kd").textContent = `${player.kills} / ${player.deaths}`;
+  if (k !== v && !k.isBomb){ k.kills++; if (MODE === "dm") score[k.team]++; if (MODE !== "dm"){ if (k.isPlayer) addMoney(KILL_MONEY); else if (k.team !== v.team) botPay(k, KILL_MONEY); } } $("sb").textContent = score[0]; $("sr").textContent = score[1]; $("kd").textContent = `${player.kills} / ${player.deaths}`;
   const el = document.createElement("div"); el.className = "kf" + (k.isPlayer || v.isPlayer ? " me" : "");
   el.innerHTML = `<span class="${TEAM[k.team].css}">${k.name}</span><i>${k.isBomb ? "✹ nổ" : head ? "⌖ headshot" : "︻╦╤─"}</i><span class="${TEAM[v.team].css}">${v.name}</span>`;
   const f = $("killfeed"); f.appendChild(el); setTimeout(() => el.remove(), 4200); while (f.children.length > 5) f.firstChild.remove();
@@ -1906,14 +2559,15 @@ function onKill(k, v, head){
     b.innerHTML = `ĐỘI ${TEAM[k.team].name} THẮNG<small>${score[0]} : ${score[1]} — trận mới sau giây lát</small>`; }
 }
 function resetMatch(){ score[0] = score[1] = 0; $("sb").textContent = $("sr").textContent = "0"; $("banner").style.display = "none"; player.kills = player.deaths = 0; $("kd").textContent = "0 / 0";
-  bots.forEach(b => { b.kills = b.deaths = 0; }); money = MODE === "dm" ? START_MONEY : ROUND_START_MONEY; roundNo = 0; clearFloorGuns(); hudSub();
+  bots.forEach(b => { b.kills = b.deaths = 0; b.money = ROUND_START_MONEY; b.armor = 0; b.helmet = false; setBotGun(b, botSide(b)); }); money = MODE === "dm" ? START_MONEY : ROUND_START_MONEY; roundNo = 0; clearFloorGuns(); hudSub();
   if (MODE === "dm"){ bots.forEach(b => respawnBot(b)); spawnPlayer(); spawnDmGuns(); } else startRound(true);
   hudAmmo(); }
 
 // ============================================================================
 // CHẾ ĐỘ CHƠI — vòng đấu (không hồi sinh), giải cứu con tin, đặt bom
 // ============================================================================
-const ROUND_TIME = 150, ROUND_END = 5, WIN_MONEY = 3000, LOSE_MONEY = 1500, RESCUE_MONEY = 1000, PLANT_MONEY = 300, FUSE = 40, PLANT_T = 3, DEFUSE_T = 6;
+const ROUND_TIME = 180, ROUND_END = 5, WIN_MONEY = 3000, LOSE_MONEY = 1500, RESCUE_MONEY = 1000, PLANT_MONEY = 300, FUSE = 40, PLANT_T = 3;
+const defuseNeed = who => who === player && defuseKit ? 5 : 10;
 let roundT = ROUND_TIME, roundState = "play", roundEndT = 0, roundNo = 0;
 const dist2 = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 function teamAlive(t){ let n = PT === t && player.alive ? 1 : 0; for (const b of bots) if (b.team === t && b.alive) n++; return n; }
@@ -1927,7 +2581,7 @@ function freeSpot(cx, cz, r){
 }
 
 // ---------- CON TIN: dân thường (model lính glTF bỏ súng, áo cam/trắng), không bị bắn trúng, đi theo vệt bước chân của người dẫn
-const HOSTAGE_SPOTS = [[-37, -33], [37, -33], [2, -27]];
+const HOSTAGE_SPOTS = [[-25, -74], [25, -74], [0, -62]];
 const HOST_COL = { Swat: 0xe8792a, Black: 0xf2efe8, Grey: 0xe6e2d8, Brown: 0x5a4030 };
 const hostages = []; let rescued = 0;
 function makeHostage(i){
@@ -2032,7 +2686,10 @@ function hudCtx(){
 // ---------- SÚNG RƠI DƯỚI ĐẤT (kiểu CS): ai chết cũng rơi súng chính; nhặt bằng phím Dùng, đi qua thì tự nhặt nếu ô còn trống
 const floorGuns = [], dmPads = [], FLOOR_CAP = 12, FLOOR_LIFE = 30;
 // đấu đội: súng cắm sẵn trên lối đi, nhặt thì ô đó hồi lại sau vài giây. Chết rơi súng thì hết hạn như cũ.
-const DM_GUNS = [["rifle", -11, -9], ["smg", 11, -8], ["shotgun", 0, -3.2], ["sniper", -32, -20], ["deagle", 27, -12], ["rifle", -14, 8], ["smg", 15, 7], ["shotgun", 0, 8], ["sniper", 22, 20], ["deagle", -18, 22], ["grenade", -13, -6], ["pistol", 12, 18]];
+const DM_GUNS = [["ak47", -11, -9], ["mp5", 11, -8], ["m3", 0, -3.2], ["awp", -32, -20], ["deagle", 27, -12], ["m4a1", -14, 8], ["p90", 15, 7], ["xm1014", 0, 8], ["scout", 22, 20], ["elite", -18, 22], ["he", -13, -6], ["glock", 12, 18],
+  ["sg552", -90, -2], ["galil", -56, -1], ["ump45", -77, 10], ["tmp", -80, 33], ["smoke", -51, 2], ["usp", -102, -26],
+  ["m249", 99, 0], ["aug", 62, 0], ["famas", 52, 16], ["mac10", 82, -31], ["awp", 104, 20], ["sg550", 108, -30], ["flash", 45, 8],
+  ["m4a1", -86, -70], ["awp", -25, -88], ["p90", 54, -62], ["xm1014", 96, -70], ["deagle", -54, -88], ["galil", 8, -62], ["he", 66, -74], ["scout", 109, -96]];
 const floorDiscGeo = new THREE.CircleGeometry(.55, 24), floorDiscMat = new THREE.MeshBasicMaterial({ color: 0xffe28a, transparent: true, opacity: .2, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 });
 const sharedMats = new Set(Object.values(gm));
 function removeGun(f){
@@ -2043,8 +2700,9 @@ function clearFloorGuns(){ while (floorGuns.length) removeGun(floorGuns[0]); dmP
 function dropGun(wi, x, y, z, clip, reserve, opt){
   const pin = !!opt?.pin;
   if (!pin && floorGuns.filter(f => !f.pin).length >= FLOOR_CAP){ const o = floorGuns.find(f => !f.pin); if (o) removeGun(o); }
-  const g = new THREE.Group(), gun = WEAPONS[wi].build(true);
-  gun.rotation.z = Math.PI / 2; gun.position.set(0, .03, 0); gun.traverse(o => { if (o.isMesh) o.castShadow = true; }); g.add(gun);
+  const gsw = GSWM[WEAPONS[wi].id], g = new THREE.Group(), gun = gsw ? new MDLModel(gsw).root : WEAPONS[wi].build(true);
+  if (!gsw){ gun.rotation.z = Math.PI / 2; gun.position.set(0, .03, 0); }
+  gun.traverse(o => { if (o.isMesh) o.castShadow = true; }); g.add(gun);
   const disc = new THREE.Mesh(floorDiscGeo, floorDiscMat); disc.rotation.x = -Math.PI / 2; disc.position.y = .012; g.add(disc);
   g.position.set(x, groundAt(x, z, (y || 0) + .4) + .02, z); g.rotation.y = Math.random() * 6.283; scene.add(g);
   const w = WEAPONS[wi];
@@ -2055,13 +2713,13 @@ function spawnDmGuns(){
 }
 function pickUpGun(f){
   const w = WEAPONS[f.wi], slot = w.slot, old = inv[slot];
-  if (w.cls === "nade" && nades >= 1){ notice("ĐANG CÓ LỰU ĐẠN"); return; }
+  if (w.cls === "nade"){ if (gren[w.kind] >= (w.max || 1)){ notice("ĐÃ ĐỦ " + w.name.toUpperCase()); return; } }
   const home = f.home;
-  if (old != null && old !== IDX.knife){ const a = Math.random() * 6.283; dropGun(old, f.pos.x + Math.cos(a) * .45, player.pos.y, f.pos.z + Math.sin(a) * .45, old === IDX.grenade ? 1 : wst[old].clip, old === IDX.grenade ? 0 : wst[old].reserve); if (old === IDX.grenade) nades = 0; }
+  if (w.cls !== "nade" && old != null && old !== IDX.knife){ const a = Math.random() * 6.283; dropGun(old, f.pos.x + Math.cos(a) * .45, player.pos.y, f.pos.z + Math.sin(a) * .45, wst[old].clip, wst[old].reserve); }
   const wasCur = old === cur || f.wi === cur;
   removeGun(f); if (home) dmPads.push({ ...home, t: 12 });
   inv[slot] = f.wi;
-  if (w.cls === "nade"){ nades = 1; wst[f.wi].clip = 1; wst[f.wi].reserve = 0; }
+  if (w.cls === "nade"){ gren[w.kind] = Math.min(w.max || 1, gren[w.kind] + 1); wst[f.wi].clip = 1; wst[f.wi].reserve = 0; }
   else { wst[f.wi].clip = f.clip; wst[f.wi].reserve = f.reserve; }
   if (wasCur){ vm[cur].root.visible = false; cur = f.wi; vm[cur].root.visible = true; if (vm[cur].gl) vm[cur].play("Idle"); reloadT = 0; pending = -1; switchT = 0; }
   else switchTo(f.wi);
@@ -2070,7 +2728,11 @@ function pickUpGun(f){
 function updateFloorGuns(dt){
   for (let i = floorGuns.length - 1; i >= 0; i--){ const f = floorGuns[i];
     if (!f.pin && MODE === "dm" && (f.t -= dt) <= 0){ removeGun(f); continue; }
-    if (player.alive && (WEAPONS[f.wi].cls === "nade" ? nades < 1 : inv[WEAPONS[f.wi].slot] == null) && Math.abs(f.pos.y - player.pos.y) < 1.2 && dist2(f.pos, player.pos) < 1.15){ pickUpGun(f); continue; }
+    if (player.alive && (WEAPONS[f.wi].cls === "nade" ? gren[WEAPONS[f.wi].kind] < (WEAPONS[f.wi].max || 1) : inv[WEAPONS[f.wi].slot] == null) && Math.abs(f.pos.y - player.pos.y) < 1.2 && dist2(f.pos, player.pos) < 1.15){ pickUpGun(f); continue; }
+    if (MODE === "dm" && WEAPONS[f.wi].slot === 1){
+      const b = bots.find(b => b.alive && WEAPONS[b.wi].slot !== 1 && Math.abs(f.pos.y - b.pos.y) < 1.2 && dist2(f.pos, b.pos) < 1.2);
+      if (b){ removeGun(f); if (f.home) dmPads.push({ ...f.home, t: 12 }); setBotGun(b, f.wi); b.clip = Math.max(1, f.clip); b.goalPt = null; b.path = []; continue; }
+    }
   }
   for (let i = dmPads.length - 1; i >= 0; i--){ const p = dmPads[i];
     if ((p.t -= dt) > 0) continue;
@@ -2080,9 +2742,9 @@ function updateFloorGuns(dt){
 }
 function dropOnDeath(v){
   if (v.isPlayer){ let k = 0;
-    for (const slot of [1, 2]){ const wi = inv[slot]; if (wi == null || (slot === 2 && wi === IDX.pistol)) continue;
-      dropGun(wi, v.pos.x + (k++ ? .5 : 0), v.pos.y, v.pos.z, wst[wi].clip, wst[wi].reserve); inv[slot] = slot === 2 ? IDX.pistol : null; }
-  } else if (!v.isHostage) dropGun(IDX.rifle, v.pos.x, v.pos.y, v.pos.z, 30, 30);      // bot: VK-47, đầy băng + 1 băng dự phòng
+    for (const slot of [1, 2]){ const wi = inv[slot]; if (wi == null || (slot === 2 && wi === sidearm())) continue;
+      dropGun(wi, v.pos.x + (k++ ? .5 : 0), v.pos.y, v.pos.z, wst[wi].clip, wst[wi].reserve); inv[slot] = slot === 2 ? sidearm() : null; }
+  } else if (!v.isHostage && v.wi != null && v.wi !== botSide(v)){ dropGun(v.wi, v.pos.x, v.pos.y, v.pos.z, Math.max(v.clip, 1), WEAPONS[v.wi].reserve); v.armor = 0; v.helmet = false; }
 }
 
 // ---------- BOM: điểm A (khán đài) / B (vườn hồng), mang – rơi – nhặt – đặt – gỡ – nổ
@@ -2141,7 +2803,7 @@ function updateBomb(dt){
     bomb.plantT += dt; bomb.plantTick = true; if (bomb.plantT >= PLANT_T) plantBomb(player); }
   // người chơi gỡ bom: trong 1,5 m, giữ phím Dùng 6 giây
   if (play && bomb.state === "planted" && PT === 0 && player.alive && isDown("use") && dist2(player.pos, bomb.pos) < 1.5 && Math.abs(player.pos.y - bomb.pos.y) < 1.5 && (!bomb.defuser || bomb.defuser === player || !bomb.defuser.alive)){
-    bomb.defuser = player; bomb.defuseT += dt; bomb.defuseTick = true; if (bomb.defuseT >= DEFUSE_T) defuseBomb(); }
+    bomb.defuser = player; bomb.defuseT += dt; bomb.defuseTick = true; if (bomb.defuseT >= defuseNeed(player)) defuseBomb(); }
   if (!bomb.plantTick) bomb.plantT = 0;
   if (!bomb.defuseTick){ bomb.defuseT = 0; bomb.defuser = null; }
   bomb.plantTick = bomb.defuseTick = false;
@@ -2160,7 +2822,7 @@ function botObjective(b, dt){
       if (b.team === 1 && bomb.state === "carried" && bomb.carrier === b && siteAt(b.pos)){
         b.path.length = 0; b.goalPt = null; bomb.plantT += dt; bomb.plantTick = true; if (bomb.plantT >= PLANT_T) plantBomb(b); return true; }
       if (b.team === 0 && bomb.state === "planted" && dist2(b.pos, bomb.pos) < 1.4 && (!bomb.defuser || bomb.defuser === b || !bomb.defuser.alive)){
-        b.path.length = 0; b.goalPt = null; bomb.defuser = b; bomb.defuseT += dt; bomb.defuseTick = true; if (bomb.defuseT >= DEFUSE_T) defuseBomb(); return true; }
+        b.path.length = 0; b.goalPt = null; bomb.defuser = b; bomb.defuseT += dt; bomb.defuseTick = true; if (bomb.defuseT >= defuseNeed(b)) defuseBomb(); return true; }
     } else if (MODE === "hostage" && b.team === 0){
       let lead = null, far = false;
       for (const h of hostages) if (!h.rescued && h.leader === b){ lead = h; if (dist2(h.pos, b.pos) > 7) far = true; }
@@ -2215,9 +2877,15 @@ function onActorDeath(v){
 // ---------- vòng đấu
 function startRound(first){
   roundNo++; roundState = "play"; roundT = ROUND_TIME; roundEndT = 0; $("banner").style.display = "none"; clearFloorGuns();
+  if (money < MIN_ROUND_MONEY) addMoney(MIN_ROUND_MONEY - money);          // vốn tối thiểu mỗi vòng
+  for (const b of bots) b.money = Math.max(b.money, MIN_ROUND_MONEY);
   for (const t of [0, 1]){ const off = Math.random() * SPAWN[t].length | 0; let k = 0;     // mỗi người một điểm xuất phát
     if (t === PT){ spawnPlayer(!first && player.alive, off); k++; }
-    for (const b of bots) if (b.team === t){ respawnBot(b, off + k++); b.rescuer = false; } }
+    for (const b of bots) if (b.team === t){
+      const kept = !first && b.alive;                 // sống sót qua vòng thì giữ súng và giáp
+      if (!kept){ setBotGun(b, botSide(b)); b.armor = 0; b.helmet = false; }
+      respawnBot(b, off + k++); b.rescuer = false; botBuy(b);
+    } }
   if (MODE === "hostage"){ resetHostages(); bots.filter(b => b.team === 0).sort(() => Math.random() - .5).slice(0, 2).forEach(b => { b.rescuer = true; }); }
   if (MODE === "bomb") resetBomb();
   notice(`VÒNG ${roundNo}`); hudSub(); hudMode();
@@ -2226,6 +2894,7 @@ function endRound(win, reason){
   if (roundState !== "play" || matchOver) return;
   roundState = "end"; roundEndT = ROUND_END; score[win]++; $("sb").textContent = score[0]; $("sr").textContent = score[1];
   addMoney(win === PT ? WIN_MONEY : LOSE_MONEY);
+  for (const b of bots) botPay(b, b.team === win ? WIN_MONEY : LOSE_MONEY);
   const el = $("banner"); el.style.display = "block"; el.style.color = win ? "var(--red)" : "var(--blue)";
   if (score[win] >= OPT.rounds){ matchOver = 7; el.innerHTML = `${teamName(win)} THẮNG TRẬN<small>${reason} · ${score[0]} : ${score[1]} — trận mới sau giây lát</small>`; }
   else el.innerHTML = `${teamName(win)} THẮNG<small>${reason}</small>`;
@@ -2282,7 +2951,7 @@ function hudMode(){
   }
   if (o !== hudO){ hudO = o; $("obj").innerHTML = o; }
   let p = "", f = 0;
-  if (MODE === "bomb"){ if (bomb.carrier === player && bomb.plantT > 0){ p = "ĐANG ĐẶT BOM"; f = bomb.plantT / PLANT_T; } else if (bomb.defuser === player && bomb.defuseT > 0){ p = "ĐANG GỠ BOM"; f = bomb.defuseT / DEFUSE_T; } }
+  if (MODE === "bomb"){ if (bomb.carrier === player && bomb.plantT > 0){ p = "ĐANG ĐẶT BOM"; f = bomb.plantT / PLANT_T; } else if (bomb.defuser === player && bomb.defuseT > 0){ p = "ĐANG GỠ BOM"; f = bomb.defuseT / defuseNeed(player); } }
   if (p !== hudP){ hudP = p; $("prog").style.display = p ? "block" : "none"; $("proglab").textContent = p; }
   if (p) $("progfill").style.width = (f * 100).toFixed(1) + "%";
 }
@@ -2319,7 +2988,7 @@ function setupMatch(){
 // ============================================================================
 function hudAmmo(){
   const w = W(), gun = w.cls !== "knife" && w.cls !== "nade";
-  $("clip").textContent = gun ? wst[cur].clip : w.cls === "nade" ? nades : "—"; $("res").textContent = gun ? "/ " + wst[cur].reserve : ""; $("wname").textContent = w.name;
+  $("clip").textContent = gun ? wst[cur].clip : w.cls === "nade" ? (gren[w.kind] || 0) : "—"; $("res").textContent = gun ? "/ " + wst[cur].reserve : ""; $("wname").textContent = w.name;
   hudMoney(); hudSlots();
 }
 let hudMoneyS = "", hudSlotS = "";
@@ -2342,9 +3011,12 @@ function hudSlots(){
 }
 function hudHp(){ const h = Math.max(0, Math.ceil(player.health)); $("hp").textContent = h; $("hpfill").style.width = h + "%"; $("armor").textContent = Math.ceil(armor); }
 const chEl = ["ch-t", "ch-b", "ch-l", "ch-r"].map($);
+let scopeOn = false;
 function hudCross(){
-  const sp0 = W().spread, gap = 3 + (sp0.base + Math.min(shotsF, 14) * sp0.inc) * 1500 * lerp(1, .5, adsK) + recoil.p * 22 + clamp(player.speed / 5.2, 0, 1) * 2.5 + (player.onGround ? 0 : 5), len = 8, vis = player.alive && W().id !== "sniper" && (adsK < .6 || W().cls !== "rifle");
-  $("scope").style.display = W().id === "sniper" && adsK > .8 && player.alive ? "block" : "none";
+  const scoped = W().adsFov && W().adsFov <= 28;
+  const sp0 = W().spread, gap = 3 + (sp0.base + Math.min(shotsF, 14) * sp0.inc) * 1500 * lerp(1, .5, adsK) + recoil.p * 22 + clamp(player.speed / 5.2, 0, 1) * 2.5 + (player.onGround ? 0 : 5), len = 8, vis = player.alive && !scoped && (adsK < .6 || W().cls !== "rifle");
+  scopeOn = !!scoped && adsK > .8 && player.alive;
+  $("scope").style.display = scopeOn ? "block" : "none";
   const st = [[-1, -gap - len, 2, len], [-1, gap, 2, len], [-gap - len, -1, len, 2], [gap, -1, len, 2]];
   chEl.forEach((e, i) => { e.style.display = vis ? "block" : "none"; e.style.transform = `translate(${st[i][0]}px,${st[i][1]}px)`; e.style.width = st[i][2] + "px"; e.style.height = st[i][3] + "px"; });
 }
@@ -2384,7 +3056,7 @@ function updatePlayer(dt){
   const ox = player.pos.x, oz = player.pos.z; player.height = lerp(1.75, 1.2, player.crouch);
   moveBody(player, player.vel.x * dt, player.vel.z * dt, dt);
   player.speed = Math.hypot(player.pos.x - ox, player.pos.z - oz) / dt;
-  player.pos.x = clamp(player.pos.x, -41.6, 41.6); player.pos.z = clamp(player.pos.z, -35.6, 35.6);
+  player.pos.x = clamp(player.pos.x, -103.6, 111.6); player.pos.z = clamp(player.pos.z, -115.6, 35.6);
   const eh = player.pos.y + lerp(1.62, 1.1, player.crouch); eyeY = player.onGround ? lerp(eyeY, eh, 1 - Math.exp(-dt * 20)) : eh;
   player.lastHurt += dt; if (player.lastHurt > 6 && player.health < 100){ player.health = Math.min(100, player.health + 9 * dt); hudHp(); }
   // bước chân
@@ -2404,15 +3076,16 @@ function updatePlayer(dt){
 const smoothBell = (p, a, b, c, d) => smooth(a, b, p) * (1 - smooth(c, d, p));
 function updateWeapon(dt){
   fireCd -= dt; if (noticeT > 0) noticeT -= dt; const w = W(), v = vm[cur], P = v.P;
-  // đổi súng
+  const refFov = v.gs ? VM_GS_FOV : VM_REF_FOV; if (refFov !== vmRefFov){ vmRefFov = refFov; fitVm(); }
+  // đổi súng (model CS: đổi ngay rồi chạy hoạt cảnh rút súng)
   let lower = 0;
   if (switchT > 0){ switchT -= dt; const p = 1 - switchT / .42;
-    if (p >= .5 && pending >= 0){ v.root.visible = false; cur = pending; pending = -1; vm[cur].root.visible = player.alive; if (vm[cur].gl) vm[cur].play("Idle"); hudAmmo(); shotsF = 0; return; }
-    lower = p < .5 ? p * 2 : (1 - p) * 2; }
+    if ((p >= .5 || vm[pending]?.gs) && pending >= 0){ v.root.visible = false; cur = pending; pending = -1; vm[cur].root.visible = player.alive; if (vm[cur].gl) vm[cur].play(vm[cur].gs ? "Draw" : "Idle"); hudAmmo(); shotsF = 0; return; }
+    lower = v.gs ? 0 : p < .5 ? p * 2 : (1 - p) * 2; }
   // nạp đạn
   let rp = -1;
   if (reloadT > 0){ const before = 1 - reloadT / w.reload; reloadT -= dt; rp = clamp(1 - reloadT / w.reload, 0, 1);
-    for (const c of reloadCues) if (before < c && rp >= c) sfx.mech(w.snd, reloadStep++);
+    if (!v.gs) for (const c of reloadCues) if (before < c && rp >= c) sfx.mech(w.snd, reloadStep++);
     if (reloadT <= 0){ const s = wst[cur], take = Math.min(w.clip - s.clip, s.reserve); s.clip += take; s.reserve -= take; hudAmmo(); rp = -1; } }
   $("msg").textContent = !player.alive ? $("msg").textContent : noticeT > 0 ? noticeTxt : rp >= 0 ? "ĐANG NẠP ĐẠN…" : wst[cur].clip === 0 ? (wst[cur].reserve ? "HẾT ĐẠN — BẤM R" : "HẾT ĐẠN") : "";
   // lò xo giật view-model
@@ -2422,9 +3095,10 @@ function updateWeapon(dt){
   const hip = w.hip, bx2 = Math.cos(bobT * .5) * .006 * bobAmp * (1 - adsK * .8), by = -Math.abs(Math.sin(bobT * .5)) * .008 * bobAmp * (1 - adsK * .8);
   const tilt = rp >= 0 && !v.gl ? smoothBell(rp, 0, .16, .82, 1) : 0;
   const px = lerp(hip[0], 0, adsK), py = lerp(hip[1], -P.sightY * (v.gl ? 1 : .82), adsK), pz = lerp(hip[2], v.gl ? v.adsZ : w.cls === "rifle" ? -.2 : -.3, adsK);
-  v.root.position.set(px + bx2 + sway.x * .5 - tilt * .02, py + by + sway.y * .5 + kick.y - lower * .3 - tilt * .04 + (player.onGround ? 0 : clamp(-player.vy * .004, -.02, .02)), pz + kick.z * (1 - adsK * .4));
+  const kf = v.gs ? .3 : 1;           // model CS đã có giật trong hoạt cảnh bắn
+  v.root.position.set(px + bx2 + sway.x * .5 - tilt * .02, py + by + sway.y * .5 + kick.y * kf - lower * .3 - tilt * .04 + (player.onGround ? 0 : clamp(-player.vy * .004, -.02, .02)), pz + kick.z * kf * (1 - adsK * .4));
   if (w.id === "sniper") v.root.visible = player.alive && adsK < .8;
-  v.root.rotation.set((w.tilt || 0) + kick.rx * (1 - adsK * .5) - lower * .9 + tilt * .28 + sway.y * 1.2, lerp(v.gl ? .02 : .085, 0, adsK) + sway.x * 1.4 + tilt * .15, kick.rz + tilt * .5 - sway.x * 1.5);
+  v.root.rotation.set((w.tilt || 0) + kick.rx * kf * (1 - adsK * .5) - lower * .9 + tilt * .28 + sway.y * 1.2, lerp(v.gs ? 0 : v.gl ? .02 : .085, 0, adsK) + sway.x * 1.4 + tilt * .15, kick.rz * kf + tilt * .5 - sway.x * 1.5);
   if (v.gl){ v.mixer.update(dt); if (v.hideL) v.hideL.scale.setScalar(.0001); if (flashT > 0){ flashT -= dt; if (flashT <= 0) v.flash.visible = false; } return; }
   // khoá nòng / trượt / bơm
   boltT = Math.max(0, boltT - dt * 13); let bz = boltT * w.kick.bolt;
@@ -2456,7 +3130,8 @@ function press(code){
   if (code === BIND.fire){ fireHeld = true; firePressed = true; }
   if (code === BIND.ads) ads = true;
   if (code === BIND.reload) startReload();
-  for (const k of [1, 2, 3, 4]) if (code === BIND["slot" + k]) switchTo(inv[k]);
+  for (const k of [1, 2, 3]) if (code === BIND["slot" + k]) switchTo(inv[k]);
+  if (code === BIND.slot4){ const owned = ["he", "flash", "smoke"].filter(k => gren[k] > 0); if (owned.length){ const at = owned.indexOf(WEAPONS[cur].kind); const id = owned[at < 0 ? 0 : (at + 1) % owned.length]; inv[4] = IDX[id]; switchTo(IDX[id]); } }
   if (code === BIND.buy) toggleBuy();
   if (code === BIND.use) useAction();
   if (code === BIND.last) switchTo(lastW);
@@ -2508,15 +3183,17 @@ document.addEventListener("mousemove", e => {
   sway.x = clamp(sway.x - e.movementX * .00006, -.03, .03); sway.y = clamp(sway.y + e.movementY * .00006, -.03, .03);
 });
 // vào toàn màn hình + khoá bàn phím để Ctrl + W / Ctrl + S… không bị trình duyệt bắt mất khi đang ngồi (Ctrl) như CS
+const wakeAudio = () => { if (started){ initAudio(); if (actx && actx.state !== "running") actx.resume(); } };
+for (const ev of ["pointerdown", "keydown"]) document.addEventListener(ev, wakeAudio, true);
 const lock = () => { initAudio(); if (actx && actx.state === "suspended") actx.resume(); if (NOLOCK) return;
   renderer.domElement.requestPointerLock();
   if (!document.fullscreenElement && document.documentElement.requestFullscreen)
     document.documentElement.requestFullscreen().then(() => navigator.keyboard?.lock?.(Object.values(BIND).filter(c => !c.startsWith("Mouse")).concat(["KeyW", "KeyS", "KeyD", "KeyT", "KeyN", "KeyR"])).catch(() => {})).catch(() => {}); };
 // ---------- chọn chế độ / phe / mục tiêu ở màn hình bắt đầu
 const MODE_DESC = {
-  dm: "Hồi sinh liên tục sau 3 giây. Không mua súng: VK-47, MP-9K, shotgun, SR-338, Đại bàng và lựu đạn nằm sẵn trên map (chấm vàng trên radar). Ô trống thì đi qua là nhặt, ô đã có súng thì bấm E để đổi. Đội đạt đủ số mạng trước sẽ thắng.",
-  hostage: "Theo vòng (2:30), chết thì chờ vòng sau. Cảnh sát tới gần con tin ở phía bắc / Grand Hall, bấm E để con tin đi theo rồi dẫn về cổng chính. Khủng bố canh giữ; hết giờ thì Khủng bố thắng vòng.",
-  bomb: "Theo vòng (2:30), chết thì chờ vòng sau. Khủng bố mang bom tới điểm A (Khán đài) hoặc B (Vườn hồng), đứng yên giữ E 3 giây để đặt; bom nổ sau 40 giây. Cảnh sát giữ E 6 giây cạnh bom để gỡ. Hết giờ mà chưa đặt bom thì Cảnh sát thắng.",
+  dm: "Hồi sinh liên tục sau 3 giây. Không mua súng: AK-47, M4A1, MP5, M3, AWP và các súng khác nằm sẵn trên map (chấm vàng trên radar). Ô trống thì đi qua là nhặt, ô đã có súng thì bấm E để đổi. Đội đạt đủ số mạng trước sẽ thắng.",
+  hostage: "Theo vòng (3:00), chết thì chờ vòng sau. Mua súng trong khu xuất phát (Glock 18, USP, AK-47, M4A1, AWP…). Cảnh sát tới khu học thuật phía bắc (quanh thư viện), bấm E để con tin đi theo rồi dẫn về cổng chính. Khủng bố xuất phát ở quảng trường phía bắc và canh giữ; hết giờ thì Khủng bố thắng vòng.",
+  bomb: "Theo vòng (3:00), chết thì chờ vòng sau. Mua súng như giải cứu con tin. Khủng bố mang bom tới điểm A (Khán đài) hoặc B (Vườn hồng), đứng yên giữ E 3 giây để đặt; bom nổ sau 40 giây. Cảnh sát giữ E cạnh bom để gỡ (5 giây nếu có Defuse Kit, 10 giây nếu không). Hết giờ mà chưa đặt bom thì Cảnh sát thắng.",
 };
 const saveOpt = () => { try { localStorage.setItem("campus-strike-match", JSON.stringify(OPT)); } catch {} };
 function renderOpts(){
@@ -2544,7 +3221,12 @@ $("startBtn").onclick = () => { $("start").classList.add("hidden"); setupMatch()
 $("resumeBtn").onclick = lock;
 $("menuBtn").onclick = () => { try { document.exitPointerLock?.(); } catch {} location.reload(); };   // kết thúc trận, về màn hình chọn chế độ
 document.addEventListener("pointerlockchange", () => { locked = document.pointerLockElement === renderer.domElement; $("pause").classList.toggle("hidden", locked || !started || NOLOCK || setOpen); if (!locked){ fireHeld = false; ads = false; keys.clear(); showScore(false); } });
-addEventListener("resize", () => { for (const c of [camera, vmCamera]){ c.aspect = innerWidth / innerHeight; c.updateProjectionMatrix(); } renderer.setSize(innerWidth, innerHeight); });
+// súng trên tay giữ cố định kích thước theo pixel (chuẩn chiều cao 950 px — cửa sổ trình duyệt desktop 1080p), không co giãn theo cửa sổ
+const VM_REF_H = 950, VM_REF_FOV = 52, VM_GS_FOV = 73.74;     // 73.74° dọc = fov 90 ngang ở 4:3 như CS 1.6
+let vmRefFov = VM_REF_FOV;
+function fitVm(){ vmCamera.fov = 2 * Math.atan(Math.tan(vmRefFov * Math.PI / 360) * innerHeight / VM_REF_H) * 180 / Math.PI; vmCamera.aspect = innerWidth / innerHeight; vmCamera.updateProjectionMatrix(); }
+fitVm();
+addEventListener("resize", () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); fitVm(); renderer.setSize(innerWidth, innerHeight); });
 
 // ============================================================================
 // KHỞI TẠO + VÒNG LẶP
@@ -2555,6 +3237,8 @@ camera.position.set(player.pos.x, 1.62, player.pos.z); camera.rotation.set(0, ya
 
 const clock = new THREE.Clock();
 function tick(dt){
+  if (flashLeft > 0){ flashLeft = Math.max(0, flashLeft - dt); $("flash").style.opacity = Math.min(.92, flashLeft / 1.1); } else if ($("flash").style.opacity !== "0") $("flash").style.opacity = "0";
+  updateSmokes(dt);
   if (matchOver){ matchOver -= dt; if (matchOver <= 0){ matchOver = 0; resetMatch(); } }
   updatePlayer(dt); updateWeapon(dt);
   for (const b of bots) updateBot(b, dt);
@@ -2568,14 +3252,15 @@ function frame(){
   for (let i = 0; i < canopies.length; i++){ const c = canopies[i]; c.rotation.x = Math.sin(wt * 1.15 + c.userData.ph) * .02; c.rotation.z = Math.cos(wt * .85 + c.userData.ph) * .028; }
   texWaterN.offset.set(wt * .018, wt * .011); texLakeN.offset.set(wt * .007, wt * .004);
   if (started && (locked || NOLOCK) && !window.__manual) tick(dt);
+  followSun(camera.position.x, camera.position.z);
   renderer.clear(); renderer.render(scene, camera);
-  renderer.clearDepth(); renderer.render(vmScene, vmCamera);
+  if (!scopeOn){ renderer.clearDepth(); renderer.render(vmScene, vmCamera); }
 }
 frame();
-window.__g = { inv, IDX, WEAPONS, buyKey, toggleBuy, get money(){ return money; }, set money(v){ money = v; }, get cur(){ return cur; }, get nades(){ return nades; }, liveNades, BIND, press, release, keys, vm, GL, tick, score, player, bots, nodes, colliders, fire, switchTo, startReload, recoil, get yaw(){ return yaw; }, set yaw(v){ yaw = v; }, get pitch(){ return pitch; }, set pitch(v){ pitch = v; }, set held(v){ fireHeld = v; firePressed = v; }, camera, wst,
+window.__g = { get audio(){ return actx && { state: actx.state, clips: Object.fromEntries(Object.entries(clips).map(([k, v]) => [k, v.map(b => { const d = b.getChannelData(0); let p = 0; for (let i = 0; i < d.length; i++) p = Math.max(p, Math.abs(d[i])); return [+b.duration.toFixed(2), +p.toFixed(2)]; })])) }; }, inv, IDX, WEAPONS, buyKey, toggleBuy, get money(){ return money; }, set money(v){ money = v; }, get cur(){ return cur; }, get nades(){ return gren.he; }, gren, EQUIP, get helmet(){ return helmet; }, get defuseKit(){ return defuseKit; }, liveNades, BIND, press, release, keys, vm, GL, tick, score, player, bots, nodes, colliders, fire, switchTo, startReload, recoil, get yaw(){ return yaw; }, set yaw(v){ yaw = v; }, get pitch(){ return pitch; }, set pitch(v){ pitch = v; }, set held(v){ fireHeld = v; firePressed = v; }, camera, wst,
   OPT, setupMatch, hostages, floorGuns, dropGun, pickUpGun, useTarget, bomb, SITES, startRound, endRound, useAction, groundAt, moveBody, siteAt, inSpawnZone,
   get mode(){ return MODE; }, get PT(){ return PT; }, get roundT(){ return roundT; }, set roundT(v){ roundT = v; }, get roundState(){ return roundState; }, get roundNo(){ return roundNo; },
-  get rescued(){ return rescued; }, get matchOver(){ return matchOver; }, get armor(){ return armor; }, get enemyHit(){ return enemyHit; } };
+  vmCamera, vmScene, renderer, GSMDL, GSWM, get actx(){ return actx; }, get master(){ return master; }, get rescued(){ return rescued; }, get matchOver(){ return matchOver; }, get armor(){ return armor; }, get enemyHit(){ return enemyHit; } };
 </script>
 </body>
 </html>
