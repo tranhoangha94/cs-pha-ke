@@ -228,3 +228,5 @@ clean2018	sound/weapons/usp_sliderelease.wav
 clean2018	sound/weapons/usp_unsil-1.wav
 clean2018	sound/weapons/xm1014-1.wav
 clean2018	sound/weapons/zoom.wav
+goldsrc	sound/radio/ct_fireinhole.wav
+goldsrc	sound/ambience/opera.wav

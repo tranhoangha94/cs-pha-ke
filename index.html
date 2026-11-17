@@ -912,6 +912,30 @@ function playPath(path, vol = .6){
   if (!actx) return; const e = preloadPath(path); if (!e.buf) return;
   const src = actx.createBufferSource(); src.buffer = e.buf; const g = actx.createGain(); g.gain.value = vol; src.connect(g); g.connect(master); src.start();
 }
+function playPathSoon(path, vol){
+  if (!actx) return; const e = preloadPath(path);
+  const go = () => { if (e.buf) playPath(path, vol); };
+  if (e.buf) go(); else if (e.dec) e.dec.then(go);
+}
+preloadPath("radio/ct_fireinhole.wav");
+preloadPath("ambience/opera.wav");
+let radioN = 0, operaGain = null, operaSrc = null;
+function playRadio(){ radioN++; playPathSoon("radio/ct_fireinhole.wav", .9); }
+// thư viện (nhà con tin): hát opera như căn hộ Italy — to khi sát tường, tắt trước quảng trường T (z ≈ -100)
+function updateOpera(){
+  if (!actx) return;
+  const e = preloadPath("ambience/opera.wav"); if (!e.buf) return;
+  if (!operaSrc){
+    operaSrc = actx.createBufferSource(); operaSrc.buffer = e.buf; operaSrc.loop = true;
+    operaGain = actx.createGain(); operaGain.gain.value = 0; operaSrc.connect(operaGain); operaGain.connect(master); operaSrc.start();
+  }
+  const x = player.pos.x, z = player.pos.z;
+  const dx = x < -16 ? -16 - x : x > 16 ? x - 16 : 0;
+  const dz = z < -84 ? -84 - z : z > -66 ? z + 66 : 0;
+  const d = Math.hypot(dx, dz);
+  const near = d <= 2 ? 1 : Math.max(0, 1 - (d - 2) / 14);
+  operaGain.gain.setTargetAtTime(near * .85, actx.currentTime, .3);
+}
 function initAudio(){
   if (actx) return; try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch { return; }
   master = actx.createGain(); master.gain.value = .5; const comp = actx.createDynamicsCompressor(); comp.threshold.value = -10; comp.knee.value = 12; comp.ratio.value = 3; master.connect(comp); comp.connect(actx.destination);
@@ -2226,7 +2250,7 @@ function knifeAttack(w){
 const liveNades = [], nadePool = [];
 { const gg = new THREE.SphereGeometry(.05, 10, 8), gmn = M({ color: 0x3d4a2c, roughness: .7 }); for (let i = 0; i < 4; i++){ const m = new THREE.Mesh(gg, gmn); m.scale.y = 1.2; m.castShadow = true; m.visible = false; scene.add(m); nadePool.push(m); } }
 function throwNade(w){
-  const k = w.kind || "he"; if ((gren[k] || 0) <= 0) return; gren[k]--; fireCd = w.delay; kick.zv -= 6; kick.rxv -= 6; if (vm[cur].gs) vm[cur].play("Shoot");
+  const k = w.kind || "he"; if ((gren[k] || 0) <= 0) return; gren[k]--; fireCd = w.delay; kick.zv -= 6; kick.rxv -= 6; if (vm[cur].gs) vm[cur].play("Shoot"); playRadio();
   camera.updateMatrixWorld(); const o = camera.getWorldPosition(new V3()), f = camera.getWorldDirection(new V3());
   const m = nadePool.find(x => !x.visible) || nadePool[0]; m.position.copy(o).addScaledVector(f, .5); m.position.y -= .1; m.visible = true;
   liveNades.push({ m, v: f.clone().multiplyScalar(k === "smoke" ? 14 : 17).add(new V3(player.vel.x, 3.2, player.vel.z)), t: k === "smoke" ? 1.5 : 1.9, kind: k });
@@ -3251,7 +3275,7 @@ function tick(dt){
   if (flashLeft > 0){ flashLeft = Math.max(0, flashLeft - dt); $("flash").style.opacity = Math.min(.92, flashLeft / 1.1); } else if ($("flash").style.opacity !== "0") $("flash").style.opacity = "0";
   updateSmokes(dt);
   if (matchOver){ matchOver -= dt; if (matchOver <= 0){ matchOver = 0; resetMatch(); } }
-  updatePlayer(dt); updateWeapon(dt);
+  updatePlayer(dt); updateWeapon(dt); updateOpera();
   for (const b of bots) updateBot(b, dt);
   if (MODE !== "dm") updateMode(dt);
   updateFloorGuns(dt);
@@ -3271,7 +3295,7 @@ frame();
 window.__g = { get audio(){ return actx && { state: actx.state, clips: Object.fromEntries(Object.entries(clips).map(([k, v]) => [k, v.map(b => { const d = b.getChannelData(0); let p = 0; for (let i = 0; i < d.length; i++) p = Math.max(p, Math.abs(d[i])); return [+b.duration.toFixed(2), +p.toFixed(2)]; })])) }; }, inv, IDX, WEAPONS, buyKey, toggleBuy, get money(){ return money; }, set money(v){ money = v; }, get cur(){ return cur; }, get nades(){ return gren.he; }, gren, EQUIP, get helmet(){ return helmet; }, get defuseKit(){ return defuseKit; }, liveNades, BIND, press, release, keys, vm, GL, tick, score, player, bots, nodes, colliders, fire, switchTo, startReload, recoil, get yaw(){ return yaw; }, set yaw(v){ yaw = v; }, get pitch(){ return pitch; }, set pitch(v){ pitch = v; }, set held(v){ fireHeld = v; firePressed = v; }, camera, wst,
   OPT, setupMatch, hostages, floorGuns, dropGun, pickUpGun, useTarget, bomb, SITES, startRound, endRound, useAction, groundAt, moveBody, siteAt, inSpawnZone,
   get mode(){ return MODE; }, get PT(){ return PT; }, get roundT(){ return roundT; }, set roundT(v){ roundT = v; }, get roundState(){ return roundState; }, get roundNo(){ return roundNo; },
-  vmCamera, vmScene, renderer, GSMDL, GSWM, get actx(){ return actx; }, get master(){ return master; }, get rescued(){ return rescued; }, get matchOver(){ return matchOver; }, get armor(){ return armor; }, get enemyHit(){ return enemyHit; } };
+  vmCamera, vmScene, renderer, GSMDL, GSWM, get actx(){ return actx; }, get master(){ return master; }, get rescued(){ return rescued; }, get matchOver(){ return matchOver; }, get armor(){ return armor; }, get enemyHit(){ return enemyHit; }, get radioN(){ return radioN; }, get opera(){ return operaGain ? +operaGain.gain.value.toFixed(3) : 0; }, playPath };
 </script>
 </body>
 </html>
