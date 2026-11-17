@@ -1882,7 +1882,8 @@ function makeVmGS(w, data){
   const one = (...res) => { for (const re of res){ const i = names.findIndex(n => re.test(n)); if (i >= 0) return i; } return -1; };
   const sil = n => unsil ? n.endsWith("_unsil") : !n.endsWith("_unsil");
   const idle = unsil ? one(/^idle_unsil$/, /^idle/) : one(/^idle1?$/, /^idle/);
-  const draw = unsil ? one(/^draw_unsil$/, /^draw/) : one(/^draw$/, /^draw/, /^deploy/);
+  // lựu đạn: rút ra là deploy, không được lấy nhầm hoạt cảnh ném
+  const draw = w.cls === "nade" ? one(/^deploy$/, /^draw$/) : unsil ? one(/^draw_unsil$/, /^draw/) : one(/^draw$/, /^draw/, /^deploy/);
   const reload = unsil ? one(/^reload_unsil$/) : one(/^reload$/, /^reload/);
   const shotgun = { start: one(/^start_reload/), insert: one(/^insert/), after: one(/^after_reload/) };
   let shoots = w.cls === "knife" ? all(/^midslash/) : w.cls === "nade" ? all(/^throw/) : all(/^shoot/).filter(i => sil(names[i]) && !/empty|last/.test(names[i]));
@@ -2172,9 +2173,19 @@ function startReload(){
 }
 let lastW = IDX.knife;
 function switchTo(i){ if (!owned(i) || i === cur || i === pending || !player.alive) return; lastW = pending >= 0 ? pending : cur; pending = i; switchT = .42; reloadT = 0; ads = false; }
+const grenKinds = () => ["he", "flash", "smoke"].filter(k => gren[k] > 0);
+function selectGrenade(){
+  const list = grenKinds(); if (!list.length){ inv[4] = null; return; }
+  const kind = WEAPONS[cur] && WEAPONS[cur].kind; let id;
+  if (list.includes(kind)) id = list[(list.indexOf(kind) + 1) % list.length];
+  else if (inv[4] != null && list.includes(WEAPONS[inv[4]].kind)) id = WEAPONS[inv[4]].id;
+  else id = list[0];
+  inv[4] = IDX[id]; switchTo(IDX[id]);
+}
+function selectSlot(n){ if (n === 4) selectGrenade(); else if (inv[n] != null) switchTo(inv[n]); }
 function fire(){
   const w = W(), s = wst[cur];
-  if (!player.alive || reloadT > 0 || switchT > 0 || fireCd > 0) return;
+  if (buyOpen || !player.alive || reloadT > 0 || switchT > 0 || fireCd > 0) return;
   if (w.cls === "knife") return knifeAttack(w); if (w.cls === "nade") return throwNade(w);
   if (s.clip <= 0){ sfx.click(); fireCd = .25; startReload(); return; }
   s.clip--; fireCd = w.delay; hudAmmo();
@@ -2311,7 +2322,7 @@ function buyKey(n){
   if (w.cls !== "nade" && inv[w.slot] === i){ notice("BẠN ĐANG CÓ SÚNG NÀY"); return; }
   if (money < w.price){ notice("KHÔNG ĐỦ TIỀN"); return; }
   addMoney(-w.price); sfx.click(0, .5); sfx.click(.12, .5);
-  if (w.cls === "nade"){ gren[w.kind] = Math.min(w.max || 1, gren[w.kind] + 1); inv[4] = i; if (cur !== i) switchTo(i); hudAmmo(); closeBuy(); return; }
+  if (w.cls === "nade"){ gren[w.kind] = Math.min(w.max || 1, gren[w.kind] + 1); inv[4] = i; hudAmmo(); notice("ĐÃ MUA — BẤM " + keyName(BIND.slot4) + " ĐỂ LẤY"); closeBuy(); return; }
   const wasCur = inv[w.slot] === cur; inv[w.slot] = i; wst[i].clip = w.clip; wst[i].reserve = w.reserve;
   if (wasCur){ vm[cur].root.visible = false; cur = i; vm[cur].root.visible = true; if (vm[cur].gl) vm[cur].play("Idle"); reloadT = 0; pending = -1; switchT = 0; hudAmmo(); } else switchTo(i);
   closeBuy(); hudAmmo();
@@ -3004,9 +3015,10 @@ function hudMoney(){
 // thanh ô vũ khí giữa đáy màn hình (ô đang cầm được tô sáng, thêm ô BOM khi đang mang)
 function hudSlots(){
   const sel = pending >= 0 ? pending : cur, bombed = MODE === "bomb" && bomb.state === "carried" && bomb.carrier === player;
-  const s = [1, 2, 3, 4].map(k => inv[k] ?? "").join(",") + "|" + sel + "|" + bombed;
+  const s = [1, 2, 3, 4].map(k => inv[k] ?? "").join(",") + "|" + sel + "|" + bombed + "|" + gren.he + gren.flash + gren.smoke;
   if (s === hudSlotS) return; hudSlotS = s;
-  $("slotbar").innerHTML = [1, 2, 3, 4].filter(k => inv[k] != null).map(k => `<div class="sl${inv[k] === sel ? " on" : ""}"><b>${k}</b>${WEAPONS[inv[k]].name.split(" · ")[0]}</div>`).join("") +
+  const slotName = k => { const w = WEAPONS[inv[k]], base = w.name.split(" · ")[0]; return w.cls === "nade" ? base + " ×" + (gren[w.kind] || 0) : base; };
+  $("slotbar").innerHTML = [1, 2, 3, 4].filter(k => inv[k] != null).map(k => `<div class="sl${inv[k] === sel ? " on" : ""}"><b>${k}</b>${slotName(k)}</div>`).join("") +
     (bombed ? `<div class="sl bomb"><b>5</b>BOM</div>` : "");
 }
 function hudHp(){ const h = Math.max(0, Math.ceil(player.health)); $("hp").textContent = h; $("hpfill").style.width = h + "%"; $("armor").textContent = Math.ceil(armor); }
@@ -3071,7 +3083,7 @@ function updatePlayer(dt){
   camera.rotation.set(clamp(pitch + recoil.p, -1.55, 1.55), yaw + recoil.y, kick.rz * .15);
   adsK = lerp(adsK, ads && reloadT <= 0 && switchT <= 0 && W().canAds !== false ? 1 : 0, 1 - Math.exp(-dt * 16));
   const fov = lerp(74, W().adsFov || (W().cls === "rifle" ? 52 : 62), adsK); if (Math.abs(camera.fov - fov) > .05){ camera.fov = fov; camera.updateProjectionMatrix(); }
-  if (fireHeld && (W().auto || firePressed)){ firePressed = false; fire(); }
+  if (buyOpen) firePressed = false; else if (fireHeld && (W().auto || firePressed)){ firePressed = false; fire(); }
 }
 const smoothBell = (p, a, b, c, d) => smooth(a, b, p) * (1 - smooth(c, d, p));
 function updateWeapon(dt){
@@ -3127,11 +3139,10 @@ function updateWeapon(dt){
 let capturing = null, setOpen = false, setFrom = null;
 function press(code){
   if (!started || !(locked || NOLOCK)) return;
-  if (code === BIND.fire){ fireHeld = true; firePressed = true; }
+  if (code === BIND.fire){ if (!buyOpen){ fireHeld = true; firePressed = true; } }
   if (code === BIND.ads) ads = true;
   if (code === BIND.reload) startReload();
-  for (const k of [1, 2, 3]) if (code === BIND["slot" + k]) switchTo(inv[k]);
-  if (code === BIND.slot4){ const owned = ["he", "flash", "smoke"].filter(k => gren[k] > 0); if (owned.length){ const at = owned.indexOf(WEAPONS[cur].kind); const id = owned[at < 0 ? 0 : (at + 1) % owned.length]; inv[4] = IDX[id]; switchTo(IDX[id]); } }
+  for (const k of [1, 2, 3, 4]) if (code === BIND["slot" + k]) selectSlot(k);
   if (code === BIND.buy) toggleBuy();
   if (code === BIND.use) useAction();
   if (code === BIND.last) switchTo(lastW);
