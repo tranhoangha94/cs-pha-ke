@@ -161,6 +161,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { WEAPON_CATALOG, EQUIP } from "./assets/weapons.js";
 import { parseMDL, MDLModel } from "./assets/goldsrc-mdl.js";
 
@@ -559,6 +560,15 @@ function lamp(x, z, y0 = 0){
 window.__M0 = [RNGN, ARTN];
 const mapRng = mulberry(20261118), mart = mulberry(1118);
 mrng = mapRng;
+// bản đồ môi trường dựng từ bầu trời + đường chân trời + mặt đất + mặt trời → phản chiếu trên sơn xe, kính, kim loại, nước
+const skyEnv = (() => { const c = document.createElement("canvas"); c.width = 512; c.height = 256; const g = c.getContext("2d");
+  const gr = g.createLinearGradient(0, 0, 0, 256); gr.addColorStop(0, "#2d6db3"); gr.addColorStop(.3, "#7fb0dc"); gr.addColorStop(.48, "#dfe8ee"); gr.addColorStop(.5, "#b9b4a6"); gr.addColorStop(.56, "#8e8f84"); gr.addColorStop(1, "#4a4c44");
+  g.fillStyle = gr; g.fillRect(0, 0, 512, 256);
+  g.fillStyle = "rgba(235,236,232,.9)"; for (let i = 0; i < 26; i++) g.fillRect(i * 20, 128 - 6 - (i * 37 % 13), 14, 6 + (i * 37 % 13));     // dải nhà phía chân trời
+  const sg = g.createRadialGradient(150, 64, 0, 150, 64, 34); sg.addColorStop(0, "rgba(255,250,235,1)"); sg.addColorStop(.25, "rgba(255,240,210,.9)"); sg.addColorStop(1, "rgba(255,240,210,0)"); g.fillStyle = sg; g.fillRect(100, 20, 100, 90);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.mapping = THREE.EquirectangularReflectionMapping;
+  const pm = new THREE.PMREMGenerator(renderer), out = pm.fromEquirectangular(t).texture; pm.dispose(); t.dispose(); return out; })();
+const withEnv = (m, k) => { m.envMap = skyEnv; m.envMapIntensity = k; m.needsUpdate = true; return m; };
 const CA = 0xf6f7f8, SPORT = 0xeef1f4, DORM = 0xf2f2f0;
 const mRoad = M({ color: 0x55585b, roughness: .92 }), mLine = M({ color: 0xe8e6de, roughness: .8 }), mWhite = M({ color: 0xf2f2ee, roughness: .8 });
 const mConcrete = M({ map: texStone, color: 0xc4c5c2 }), mMarble = M({ color: 0xe9e6df, roughness: .35 }), mTrack = M({ color: 0xb4553e, roughness: .95 });
@@ -585,7 +595,22 @@ plane(-23, -5, -10, 7, .045, matPlaza, 4);
 plane(7, -58, 42, -40, .04, mRoad, 4);                                             // bãi gửi xe
 for (let x = 9; x < 41; x += 3.4) for (const z of [-56.5, -46]) deco(x - .05, z, x + .05, z + 4.6, .041, .046, mLine, { shadow: false });
 plane(62, 64, 112, 100, .035, matPave, 3.2); plane(62, 100, 70, 136, .035, matPave, 3.2);     // sân quanh nhà thi đấu + lối ra ký túc xá
-plane(61, -4.6, 112, 10.6, .04, matPave, 3.2); plane(61, -1.6, 112, 7.6, .045, matPlaza, 4);   // LỐI ĐI SINH VIÊN từ Cổng San Hô, chạy sát mép bắc sân vận động
+// LỐI ĐI SINH VIÊN từ Cổng San Hô, chạy sát mép bắc sân vận động: đường bê tông 2 làn có vạch kẻ, vỉa hè phía công trường, dải cỏ + hàng cây phía sân
+{ const conc = canvasTex(512, (g, s) => { g.fillStyle = "#b4b3ad"; g.fillRect(0, 0, s, s);
+    for (let i = 0; i < 9000; i++){ const v = 150 + mapRng() * 60 | 0; g.fillStyle = `rgba(${v},${v},${v - 4},.28)`; g.fillRect(mapRng() * s, mapRng() * s, 1 + mapRng() * 2.5, 1 + mapRng() * 2.5); }
+    for (let i = 0; i < 18; i++){ const x = mapRng() * s, y = mapRng() * s, r = 20 + mapRng() * 60, gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, `rgba(90,88,80,${.06 + mapRng() * .08})`); gr.addColorStop(1, "rgba(0,0,0,0)"); g.fillStyle = gr; g.fillRect(x - r, y - r, 2 * r, 2 * r); }
+    g.fillStyle = "rgba(60,60,56,.55)"; g.fillRect(0, 0, s, 3); g.fillRect(0, 0, 3, s);                                   // khe co giãn giữa các tấm bê tông
+    for (let i = 0; i < 6; i++){ g.strokeStyle = "rgba(70,70,64,.35)"; g.lineWidth = 1; g.beginPath(); let x = mapRng() * s, y = mapRng() * s; g.moveTo(x, y); for (let k = 0; k < 5; k++){ x += (mapRng() - .5) * 40; y += (mapRng() - .5) * 40; g.lineTo(x, y); } g.stroke(); } });   // vết nứt chân chim
+  const mConcRoad = withEnv(M({ map: conc, roughness: .88 }), .15), paint = M({ color: 0xf2f1ea, roughness: .7 }), yellow = M({ color: 0xe8c23a, roughness: .7 });
+  plane(61, -3.6, 112, 8.4, .045, mConcRoad, 4.5);                                                     // mặt đường bê tông (tấm 4,5 m)
+  plane(61, -5, 112, -3.6, .05, matPave, 3.2); deco(61, -3.75, 112, -3.6, 0, .16, mConcrete, { shadow: false });   // vỉa hè + bó vỉa phía công trường
+  plane(61, 8.4, 112, 11, .05, matGrass, 2.5); deco(61, 8.4, 112, 8.55, 0, .14, mConcrete, { shadow: false });     // dải cỏ phía sân vận động
+  for (let x = 63; x < 108; x += 6) deco(x, 2.32, x + 3, 2.48, .046, .05, yellow, { shadow: false });              // vạch giữa nét đứt
+  for (const z of [-3.1, 7.9]) deco(61, z - .08, 108.5, z + .08, .046, .05, paint, { shadow: false });            // vạch biên liền
+  for (let z = -3; z < 8; z += 1.1) deco(104.5, z, 107.5, z + .55, .046, .05, paint, { shadow: false });         // vạch qua đường gần cổng
+  deco(103.6, -3.2, 103.8, 8, .046, .05, paint, { shadow: false });                                               // vạch dừng
+  for (const x of [66, 72, 78, 84, 90, 96, 104]) tree(x, 9.7, .8);                                                 // hàng cây dọc mép sân
+}
 
 // ---------- hồ + bờ kè (ôm phía nam dải chính và quanh phần nhô phía đông)
 for (const [x1, z1, x2, z2] of [[-112, 63.5, 62, 64], [62, 64, 62.5, 136], [62, 136, 112, 136.5], [111.5, 64, 112, 136]]){
@@ -771,48 +796,69 @@ for (const [x, z] of [[-24, 44.5], [-19.5, 44.5], [-14.5, 44.5], [-24, 48.5], [-
 
 // ---------- BÃI GỬI XE (phía bắc): xe điện SUV / sedan dựng chi tiết
 const CAR = (() => {
-  const paints = [0xf2f3f4, 0x1b2a44, 0xb3202a, 0x8d9399, 0x111214, 0x2f5e8c, 0xd8d1c2].map(c => new THREE.MeshPhysicalMaterial({ color: c, metalness: .25, roughness: .38, clearcoat: 1, clearcoatRoughness: .07 }));
-  const glass = new THREE.MeshPhysicalMaterial({ color: 0x0f161d, metalness: .1, roughness: .05, clearcoat: 1 }), trimBlack = M({ color: 0x141516, roughness: .6 }), tire = M({ color: 0x1a1a1a, roughness: .9 });
-  const rim = M({ color: 0xb9bec4, roughness: .3, metalness: .85 }), led = M({ color: 0xffffff, emissive: 0xeaf4ff, emissiveIntensity: 1.6 }), tail = M({ color: 0x8a0f14, emissive: 0xff1a22, emissiveIntensity: 1.1 });
+  const paints = [0xf2f3f4, 0x1b2a44, 0xb3202a, 0x8d9399, 0x111214, 0x2f5e8c, 0xd8d1c2].map(c => withEnv(new THREE.MeshPhysicalMaterial({ color: c, metalness: .45, roughness: .3, clearcoat: 1, clearcoatRoughness: .05 }), 1.25));
+  const glass = withEnv(new THREE.MeshPhysicalMaterial({ color: 0x0b1015, metalness: .2, roughness: .03, clearcoat: 1 }), 1.6), trimBlack = withEnv(M({ color: 0x141516, roughness: .55 }), .4), tire = M({ color: 0x161616, roughness: .92 });
+  const rim = withEnv(M({ color: 0xc4c9cf, roughness: .22, metalness: .9 }), 1.3), chrome = withEnv(M({ color: 0xdfe3e7, roughness: .12, metalness: 1 }), 1.5), disc = M({ color: 0x55585c, roughness: .5, metalness: .7 });
+  const led = M({ color: 0xffffff, emissive: 0xeaf4ff, emissiveIntensity: 1.6 }), tail = M({ color: 0x8a0f14, emissive: 0xff1a22, emissiveIntensity: 1.1 }), gap = M({ color: 0x050505, roughness: 1 });
   const prof = (pts) => { const sh = new THREE.Shape(); pts.forEach(([x, y], k) => k ? sh.lineTo(x, y) : sh.moveTo(x, y)); return sh; };
-  // biên dạng nhìn ngang (x dọc thân xe, mũi xe ở +x), ExtrudeGeometry theo bề rộng
-  const SUV = { L: 4.75, body: [[-2.37, .42], [2.35, .42], [2.4, .62], [2.36, .86], [2.02, 1.02], [.95, 1.08], [-1.95, 1.1], [-2.38, 1.0], [-2.42, .66]], cab: [[.92, 1.02], [.2, 1.6], [-1.7, 1.62], [-2.18, 1.08]], wb: 1.45, r: .37, h: 1.66 };
+  const SUV = { L: 4.75, body: [[-2.37, .42], [2.35, .42], [2.4, .62], [2.36, .86], [2.02, 1.02], [.95, 1.08], [-1.95, 1.1], [-2.38, 1.0], [-2.42, .66]], cab: [[.92, 1.02], [.2, 1.6], [-1.7, 1.62], [-2.18, 1.08]], wb: 1.45, r: .37, h: 1.66, rails: true };
   const SED = { L: 4.9, body: [[-2.44, .38], [2.42, .38], [2.48, .56], [2.44, .78], [1.6, .9], [.85, .95], [-1.9, .98], [-2.42, .9], [-2.48, .6]], cab: [[.82, .9], [-.1, 1.42], [-1.2, 1.44], [-2.0, .96]], wb: 1.5, r: .34, h: 1.46 };
   const geoCache = new Map();
-  const ext = (key, pts, w, bev) => { if (!geoCache.has(key)){ const g = new THREE.ExtrudeGeometry(prof(pts), { depth: w - 2 * bev, bevelEnabled: true, bevelThickness: bev, bevelSize: bev, bevelSegments: 4, curveSegments: 8 }); g.translate(0, 0, -(w - 2 * bev) / 2); geoCache.set(key, g); } return geoCache.get(key); };
-  const wheelG = new THREE.CylinderGeometry(1, 1, 1, 22), rimG = new THREE.CylinderGeometry(1, 1, 1, 10);
-  return (x, z, yaw, kind, ci) => {
-    const T = kind ? SED : SUV, g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = yaw; scene.add(g);
-    const paint = paints[ci % paints.length];
-    const body = new THREE.Mesh(ext("b" + kind, T.body, 1.9, .12), paint); body.castShadow = body.receiveShadow = true; g.add(body);
-    const cab = new THREE.Mesh(ext("c" + kind, T.cab, 1.62, .1), glass); cab.castShadow = true; g.add(cab);
-    const roofLine = new THREE.Mesh(new THREE.BoxGeometry(T.L * .42, .05, 1.5), kind ? glass : trimBlack); roofLine.position.set(-.75, T.h - .02, 0); g.add(roofLine);
+  // đùn biên dạng rồi uốn: thót dần về phía mui (tumblehome), bo tròn đầu/đuôi nhìn từ trên xuống, pháp tuyến mượt
+  const ext = (key, pts, w, bev, L, belt, pinch) => { if (!geoCache.has(key)){
+    const g = new THREE.ExtrudeGeometry(prof(pts), { depth: w - 2 * bev, bevelEnabled: true, bevelThickness: bev, bevelSize: bev, bevelSegments: 5, curveSegments: 10, steps: 1 });
+    g.translate(0, 0, -(w - 2 * bev) / 2); const ps = g.attributes.position;
+    for (let k = 0; k < ps.count; k++){ const x = ps.getX(k), y = ps.getY(k), z = ps.getZ(k), u = Math.abs(x) / (L / 2);
+      const top = Math.max(0, y - belt), f = (1 - pinch * top * top) * (1 - .14 * Math.pow(Math.min(1, u), 6)); ps.setZ(k, z * f); }
+    g.deleteAttribute("normal"); g.computeVertexNormals(); geoCache.set(key, g); } return geoCache.get(key); };
+  const tireG = new THREE.TorusGeometry(1, .42, 12, 28), discG = new THREE.CylinderGeometry(1, 1, 1, 20), spokeG = new THREE.BoxGeometry(1, 1, 1), hubG = new THREE.CylinderGeometry(1, 1, 1, 10), boxG = new THREE.BoxGeometry(1, 1, 1);
+  const B = (g, mat, sx, sy, sz, x, y, z, ry = 0) => { const m = new THREE.Mesh(boxG, mat); m.scale.set(sx, sy, sz); m.position.set(x, y, z); m.rotation.y = ry; g.add(m); return m; };
+  const buckets = new Map();   // gộp mọi mảnh của mọi xe theo vật liệu → vài lệnh vẽ cho cả bãi xe
+  const car = (x, z, yaw, kind, ci) => {
+    const T = kind ? SED : SUV, g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = yaw;
+    const paint = paints[ci % paints.length], hl = T.L / 2;
+    const body = new THREE.Mesh(ext("b" + kind, T.body, 1.9, .14, T.L, .72, .55), paint); body.castShadow = body.receiveShadow = true; g.add(body);
+    const cab = new THREE.Mesh(ext("c" + kind, T.cab, 1.66, .12, T.L, .95, .5), glass); cab.castShadow = true; g.add(cab);
+    const roof = new THREE.Mesh(ext("r" + kind, kind ? [[-.05, T.h - .06], [-1.15, T.h - .05], [-1.2, T.h + .015], [0, T.h + .015]] : [[.15, T.h - .06], [-1.65, T.h - .05], [-1.7, T.h + .02], [.2, T.h + .02]], 1.18, .03, T.L, 9, 0), paint); g.add(roof);   // nóc xe cùng màu sơn
     for (const s2 of [-1, 1]){
-      const pil = new THREE.Mesh(new THREE.BoxGeometry(.12, .5, .05), paint); pil.position.set(-.45, (T.h + .95) / 2, s2 * .8); g.add(pil);       // trụ B
-      const mir = new THREE.Mesh(new THREE.BoxGeometry(.22, .12, .18), paint); mir.position.set(.75, 1.08, s2 * 1.02); g.add(mir);
-      const skirt = new THREE.Mesh(new THREE.BoxGeometry(T.L * .62, .1, .04), trimBlack); skirt.position.set(0, .47, s2 * .96); g.add(skirt);
-      const handle = new THREE.Mesh(new THREE.BoxGeometry(.26, .04, .03), trimBlack); handle.position.set(.25, .9, s2 * .96); g.add(handle);
-      const h2 = handle.clone(); h2.position.x = -.95; g.add(h2);
+      const zz = s2 * .9;
+      for (const px of [-.45, -1.55]) B(g, gap, .03, .5, .02, px, (T.h + .98) / 2 - .02, s2 * .79);              // trụ B / C đen
+      for (const px of [.92, -.42, -1.6]) B(g, gap, .012, .5, .01, px, .7, s2 * (px > 0 ? .935 : .94));         // khe cửa
+      B(g, gap, 2.4, .012, .01, -.35, .45, s2 * .935);
+      B(g, chrome, 2.6, .025, .02, -.5, .99, s2 * .86);                                                            // nẹp viền kính
+      const mir = B(g, paint, .22, .12, .18, .72, 1.08, s2 * 1.02); B(g, gap, .02, .1, .14, .83, 1.08, s2 * 1.02);
+      B(g, trimBlack, T.L * .6, .12, .03, -.05, .5, s2 * .94);                                                     // ốp hông
+      for (const hx of [.25, -.95]) B(g, chrome, .24, .035, .03, hx, .9, s2 * .945);                               // tay nắm cửa
+      if (T.rails) B(g, chrome, 1.7, .05, .05, -.75, T.h + .06, s2 * .55);                                         // giá nóc
       for (const fx of [T.wb, -T.wb]){
-        const w = new THREE.Mesh(wheelG, tire); w.scale.set(T.r, .24, T.r); w.rotation.x = Math.PI / 2; w.position.set(fx, T.r, s2 * .82); w.castShadow = true; g.add(w);
-        const rm = new THREE.Mesh(rimG, rim); rm.scale.set(T.r * .66, .02, T.r * .66); rm.rotation.x = Math.PI / 2; rm.position.set(fx, T.r, s2 * .95); g.add(rm);
-        const arch = new THREE.Mesh(new THREE.TorusGeometry(T.r + .07, .05, 6, 16, Math.PI), trimBlack); arch.position.set(fx, T.r, s2 * .955); g.add(arch); } }
-    const fl = new THREE.Mesh(new THREE.BoxGeometry(.05, .04, 1.55), led); fl.position.set(T.L / 2 + .02, T.body[3][1] - .02, 0); g.add(fl);                // dải LED trước chạy ngang
-    for (const s2 of [-1, 1]){ const hl = new THREE.Mesh(new THREE.BoxGeometry(.06, .12, .38), led); hl.position.set(T.L / 2 + .02, .62, s2 * .66); g.add(hl); }
-    const tl = new THREE.Mesh(new THREE.BoxGeometry(.05, .05, 1.6), tail); tl.position.set(-T.L / 2 - .03, T.body[7][1] - .1, 0); g.add(tl);               // dải đèn hậu
-    const grille = new THREE.Mesh(new THREE.BoxGeometry(.05, .2, 1.2), trimBlack); grille.position.set(T.L / 2 + .03, .5, 0); g.add(grille);
-    const plateF = new THREE.Mesh(new THREE.BoxGeometry(.03, .12, .5), mWhite); plateF.position.set(T.L / 2 + .06, .48, 0); g.add(plateF);
-    const plateR = plateF.clone(); plateR.position.x = -T.L / 2 - .06; g.add(plateR);
-    // va chạm: hộp bao theo hướng xe (xe chỉ đỗ dọc hoặc ngang)
-    const along = Math.abs(Math.cos(yaw)) > .5, hl2 = T.L / 2, hw = .98;
-    solid(x - (along ? hl2 : hw), z - (along ? hw : hl2), x + (along ? hl2 : hw), z + (along ? hw : hl2), 0, 1.0, null);
+        const wg = new THREE.Group(); wg.position.set(fx, T.r, s2 * .82); g.add(wg);
+        const ty = new THREE.Mesh(tireG, tire); ty.scale.set(T.r * .72, T.r * .72, .3); ty.castShadow = true; wg.add(ty);
+        const dc = new THREE.Mesh(discG, disc); dc.scale.set(T.r * .5, .02, T.r * .5); dc.rotation.x = Math.PI / 2; dc.position.z = s2 * .04; wg.add(dc);
+        const rimF = new THREE.Group(); rimF.position.z = s2 * .1; wg.add(rimF);
+        const rr = new THREE.Mesh(new THREE.TorusGeometry(T.r * .6, .022, 6, 28), rim); rimF.add(rr);
+        const hub = new THREE.Mesh(hubG, rim); hub.scale.set(.06, .06, .06); hub.rotation.x = Math.PI / 2; rimF.add(hub);
+        for (let k = 0; k < 5; k++){ const sp = new THREE.Mesh(spokeG, rim); sp.scale.set(T.r * .56, .055, .03); sp.position.set(Math.cos(k * 1.2566) * T.r * .29, Math.sin(k * 1.2566) * T.r * .29, 0); sp.rotation.z = k * 1.2566; rimF.add(sp); }
+        const arch = new THREE.Mesh(new THREE.TorusGeometry(T.r + .08, .06, 6, 18, Math.PI), trimBlack); arch.position.set(fx, T.r, zz + .05); g.add(arch); } }
+    B(g, led, .05, .035, 1.6, hl + .02, T.body[3][1] - .02, 0);                                                     // dải LED trước
+    for (const s2 of [-1, 1]){ B(g, led, .06, .1, .34, hl + .02, .64, s2 * .64); B(g, chrome, .04, .14, .42, hl - .005, .64, s2 * .64); }
+    B(g, gap, .06, .22, 1.3, hl + .03, .47, 0); for (let k = -2; k <= 2; k++) B(g, chrome, .07, .015, 1.2, hl + .035, .47 + k * .04, 0);   // hốc gió cản trước
+    B(g, trimBlack, .08, .1, 1.7, hl + .01, .3, 0); B(g, trimBlack, .08, .1, 1.7, -hl - .01, .3, 0);                // cản trước / sau
+    B(g, tail, .05, .05, 1.62, -hl - .03, T.body[7][1] - .1, 0); for (const s2 of [-1, 1]) B(g, tail, .05, .14, .3, -hl - .03, T.body[7][1] - .2, s2 * .7);
+    B(g, mWhite, .03, .12, .5, hl + .06, .5, 0); B(g, mWhite, .03, .12, .5, -hl - .06, .5, 0);                      // biển số
+    const along = Math.abs(Math.cos(yaw)) > .5, hw = .98;
+    solid(x - (along ? hl : hw), z - (along ? hw : hl), x + (along ? hl : hw), z + (along ? hw : hl), 0, 1.0, null);
     solid(x - (along ? 1.3 : .8), z - (along ? .8 : 1.3), x + (along ? 1.3 : .8), z + (along ? .8 : 1.3), 1.0, T.h, null);
+    g.updateMatrixWorld(true);
+    g.traverse(o => { if (!o.isMesh) return; let geo = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone(); for (const k of Object.keys(geo.attributes)) if (!["position", "normal", "uv"].includes(k)) geo.deleteAttribute(k);
+      geo.applyMatrix4(o.matrixWorld); if (!buckets.has(o.material)) buckets.set(o.material, []); buckets.get(o.material).push(geo); });
   };
+  car.flush = () => { for (const [mat, list] of buckets){ const m = new THREE.Mesh(mergeGeometries(list), mat); m.castShadow = m.receiveShadow = true; scene.add(m); list.forEach(q => q.dispose()); } buckets.clear(); };
+  return car;
 })();
 { let n = 0;
   for (const [z, dir] of [[-54, 1], [-44, -1]]) for (let i = 0; i < 9; i++){ if ((i * 7 + (z < -50 ? 2 : 5)) % 4 === 0) continue; const x = 10.7 + i * 3.4;
     CAR(x, z, dir > 0 ? -Math.PI / 2 : Math.PI / 2, (i + (z < -50 ? 0 : 1)) % 3 === 0 ? 1 : 0, n++); }
-  CAR(36, -61.8, 0, 1, 2); CAR(-60, -61.8, Math.PI, 0, 5); CAR(70, 60.2, Math.PI, 0, 0); }   // vài xe đỗ ven đường
+  CAR(36, -61.8, 0, 1, 2); CAR(-60, -61.8, Math.PI, 0, 5); CAR(70, 60.2, Math.PI, 0, 0); CAR.flush(); }   // vài xe đỗ ven đường
 
 // ---------- SÂN VẬN ĐỘNG + TÒA L (khán đài ngay sát đường chạy phía nam, nhà phía sau)
 { const cx = 86, cz = 26, L = 9, r0 = 11, r1 = 15;
@@ -879,7 +925,7 @@ solid(BX - .8, BZ - .8, BX + .8, BZ + .8, 0, 1.0, null); add(new THREE.CylinderG
   plane(62, -58, 112, -5, .05, M({ map: dirt, roughness: 1 }), 6);
   const tin = canvasTex(128, (g, s) => { g.fillStyle = "#2f6fa8"; g.fillRect(0, 0, s, s); for (let x = 0; x < s; x += 8){ g.fillStyle = "rgba(255,255,255,.18)"; g.fillRect(x, 0, 3, s); g.fillStyle = "rgba(0,0,0,.18)"; g.fillRect(x + 4, 0, 3, s); }
     g.fillStyle = "#e9eef2"; g.fillRect(0, s * .72, s, s * .1); });
-  const mTin = M({ map: tin, roughness: .5, metalness: .4, side: THREE.DoubleSide }), mConc = M({ map: texStone, color: 0xa9aaa6, roughness: .95 }), mRebar = M({ color: 0x5b3a26, roughness: .7, metalness: .5 });
+  const mTin = withEnv(M({ map: tin, roughness: .45, metalness: .5, side: THREE.DoubleSide }), .9), mConc = M({ map: texStone, color: 0xa9aaa6, roughness: .95 }), mRebar = M({ color: 0x5b3a26, roughness: .7, metalness: .5 });
   const hoard = (x1, z1, x2, z2) => { solid(x1, z1, x2, z2, 0, 2.6, mTin, { tile: 2.6 }); };
   hoard(62, -5.4, 80, -5); hoard(86, -5.4, 104, -5);                                  // rào dọc lối sinh viên, chừa cổng xe x 80…86
   hoard(62, -58, 62.4, -31); hoard(62, -25, 62.4, -5.4);                              // rào phía tây (cổng người đi bộ z -31…-25)
@@ -914,19 +960,46 @@ solid(BX - .8, BZ - .8, BX + .8, BZ + .8, 0, 1.0, null); add(new THREE.CylinderG
 }
 
 // ---------- cây, đèn, chỗ nấp
+for (const [x, z] of [[73, 4.6], [91, .2]]){ solid(x - 1.3, z - .3, x + 1.3, z + .3, 0, .85, mConcrete, { tile: 1.5 }); deco(x - 1.3, z - .42, x + 1.3, z + .42, 0, .25, mConcrete, { shadow: false }); deco(x - 1.32, z - .31, x + 1.32, z + .31, .55, .7, M({ color: 0xd8382e, roughness: .7 }), { shadow: false }); }   // dải phân cách bê tông trên lối sinh viên
 for (const [x, z, k] of [[-100, -50, .9], [-86, -50, .9], [-72, -50, .9], [-58, -50, .9], [-44, -50, .9], [-30, -50, .85], [-16, -50, .85], [-100, 40, .9], [-86, 40, .9], [-72, 44, .9], [-58, 44, .9], [-44, 44, .9],
   [-100, -30, .85], [-72, -32, .85], [-44, -34, .85], [-100, 26, .85], [-72, 30, .85], [-44, 34, .85], [-2, 52, .8], [52, -48, .8],
   [-4, -44, .8], [26, -24, .8], [26, 30, .8], [54, 50, .8], [108, 96, .8], [66, 120, .8], [-34, 50, .8]]) tree(x, z, k);
-for (const [x, z] of [[-60, 3], [-40, -4], [-40, 6], [-100, -12], [-100, 14], [29, -18], [29, 20], [-20, -30], [-20, 30], [53, -30], [53, 30], [68, -3.8], [84, -3.8], [100, -3.8], [76, 9.6], [92, 9.6], [66, 98], [104, 98], [-60, 54], [-20, 58], [20, 58]]) lamp(x, z);
+for (const [x, z] of [[-60, 3], [-40, -4], [-40, 6], [-100, -12], [-100, 14], [29, -18], [29, 20], [-20, -30], [-20, 30], [53, -30], [53, 30], [68, -4.3], [84, -4.3], [100, -4.3], [66, 98], [104, 98], [-60, 54], [-20, 58], [20, 58]]) lamp(x, z);
 for (const [x, z, h] of [[-46, -26, 1.2], [-46, 30, 1.2], [-80, -14, 1.3], [-80, 16, 1.3], [-28, -24, 1.2], [-28, 28, 1.2], [10, -40, 1.2], [24, -36, 1.3], [-2, -10, 1.2], [-2, 12, 1.2],
-  [29, -30, 1.2], [29, 32, 1.2], [53, -2, 1.2], [53, 8, 1.3], [44, -38, 1.2], [72, 3, 1.2], [94, 5.2, 1.2], [96, -26, 1.3], [80, -44, 1.2], [104, 60, 1.2], [70, 74, 1.2], [70, 92, 1.3], [104, 100, 1.2],
+  [29, -30, 1.2], [29, 32, 1.2], [53, -2, 1.2], [53, 8, 1.3], [44, -38, 1.2], [96, -26, 1.3], [80, -44, 1.2], [104, 60, 1.2], [70, 74, 1.2], [70, 92, 1.3], [104, 100, 1.2],
   [60, 44, 1.2], [-6, 40, 1.2], [-40, 54, 1.3], [-90, 44, 1.2], [-90, -40, 1.2], [-58, -40, 1.2], [-20, -46, 1.2], [46, -54, 1.2], [84, -54, 1.3], [108, -34, 1.2]]) crate(x - .7, z - .7, x + .7, z + .7, h);
 for (const [x, z] of [[-90, -30], [-60, -30], [-90, 30], [-60, 34]]) bench(x - 1.3, z - .25, x + 1.3, z + .25);
+// ---------- bóng tiếp xúc mềm (thay cho ambient occlusion): mỗi khối va chạm chạm đất có một quầng tối mờ dần ra ngoài
+{ const list = colliders.filter(c => !c.noRay && c.minY < .05 && c.maxY > .3 && (c.maxX - c.minX) * (c.maxZ - c.minZ) < 2600);
+  const geo = new THREE.PlaneGeometry(2, 2); geo.rotateX(-Math.PI / 2);
+  const mat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, fog: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+    uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog]),
+    vertexShader: `attribute vec4 aBox; varying vec2 vP; varying vec4 vB;
+      #include <fog_pars_vertex>
+      void main(){ vec3 p = vec3(position.x * (aBox.x + aBox.w), position.y, position.z * (aBox.y + aBox.w)); vP = p.xz; vB = aBox;
+        vec4 mvPosition = modelViewMatrix * instanceMatrix * vec4(p, 1.0); gl_Position = projectionMatrix * mvPosition;
+        #include <fog_vertex>
+      }`,
+    fragmentShader: `varying vec2 vP; varying vec4 vB;
+      #include <fog_pars_fragment>
+      void main(){ vec2 q = abs(vP) - vB.xy; float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
+        float a = (1.0 - smoothstep(0.0, vB.w, d)); a = a * a * vB.z; gl_FragColor = vec4(0.0, 0.0, 0.0, a);
+        #include <fog_fragment>
+      }` });
+  const im = new THREE.InstancedMesh(geo, mat, list.length), box = new Float32Array(list.length * 4), mtx = new THREE.Matrix4();
+  list.forEach((c, k) => { const hx = (c.maxX - c.minX) / 2, hz = (c.maxZ - c.minZ) / 2, h = c.maxY - c.minY, big = h > 3;
+    mtx.makeTranslation((c.minX + c.maxX) / 2, .075, (c.minZ + c.maxZ) / 2); im.setMatrixAt(k, mtx);
+    box.set([hx, hz, big ? .62 : clamp(.25 + h * .2, .3, .5), big ? 2.4 : clamp(.35 + h * .45, .45, 1.1)], k * 4); });
+  geo.setAttribute("aBox", new THREE.InstancedBufferAttribute(box, 4)); im.frustumCulled = false; im.renderOrder = 1; scene.add(im); }
+// phản chiếu nhẹ cho tường, gờ chỉ, kim loại, nước
+for (const k in stuccoCache) withEnv(stuccoCache[k], .32);
+for (const m of [matTrim, matCornice, matStone, matRustic]) withEnv(m, .25);
+withEnv(matDark, .9); withEnv(matTowerGold, 1.2); withEnv(matWater, 1.1); withEnv(matLake, 1.0); withEnv(matVault, .9); withEnv(mFence, .7);
 mrng = rng;
 
 // build instanced windows/doors
 { const unit = new THREE.BoxGeometry(1, 1, 1), mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), col = new THREE.Color();
-  const mats = { frame: matTrim, pane: M({ color: 0x5f7f96, roughness: .06, metalness: .35 }), col: M({ color: 0xffffff }), trim: matCornice, balus: matBalus, rustic: M({ color: 0xdcd8ce, roughness: .9 }), roof: matRoofTop };
+  const mats = { frame: matTrim, pane: withEnv(M({ color: 0x3e5a6e, roughness: .04, metalness: .55 }), 1.5), col: M({ color: 0xffffff }), trim: matCornice, balus: matBalus, rustic: M({ color: 0xdcd8ce, roughness: .9 }), roof: matRoofTop };
   for (const k in INST){ const a = INST[k], im = new THREE.InstancedMesh(unit, mats[k], a.length);
     a.forEach((v, i) => { mtx.compose(new V3(v[0], v[1], v[2]), q, new V3(v[3], v[4], v[5])); im.setMatrixAt(i, mtx);
       if (k === "col") im.setColorAt(i, col.set(v[6])); else if (k === "pane") im.setColorAt(i, col.set(mart() < .1 ? 0xffd9a4 : 0xffffff)); });
