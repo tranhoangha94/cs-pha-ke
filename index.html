@@ -721,9 +721,22 @@ function courtyardBlock(x1, z1, x2, z2, h, t, az){
   solid(cx - .8, cz - .8, cx + .8, cz + .8, 0, .55, null); add(new THREE.CylinderGeometry(1.1, 1.2, .55, 24), matStone, cx, .275, cz); add(new THREE.CylinderGeometry(1, 1, .1, 24), matHedge, cx, .58, cz, false);
   for (const [px_, pz_] of [[x1, z1], [x2, z1], [x1, z2], [x2, z2]]) cornerPavilion(px_ + (px_ === x1 ? 3.4 : -3.4), pz_ + (pz_ === z1 ? 3.4 : -3.4), h + .08);
 }
-function vinTower(TX, TZ, Y0){
-  const white = matCornice, hx = 5, hz = 4.5, Y1 = Y0 + 11, Y2 = Y1 + 4.6;
-  const cyl = (rt, rb, h, y, seg, mat = white) => add(new THREE.CylinderGeometry(rt, rb, h, seg), mat, TX, y + h / 2, TZ);
+function vinTower(TX, TZ, YB){
+  const white = matCornice, cyl = (rt, rb, h, y, seg, mat = white) => add(new THREE.CylinderGeometry(rt, rb, h, seg), mat, TX, y + h / 2, TZ);
+  // tầng lùi rộng trên mái thân chính, bốn chòi góc có vòm nhỏ + bình
+  { const tx = 6.5, tz = 11, YT = YB + 4.6;
+    solid(TX - tx, TZ - tz, TX + tx, TZ + tz, YB, YT, stucco(CA), { tile: 4 });
+    for (const [ax, a0, a1, f, n] of [["x", TX - tx, TX + tx, TZ - tz, -1], ["x", TX - tx, TX + tx, TZ + tz, 1], ["z", TZ - tz, TZ + tz, TX - tx, -1], ["z", TZ - tz, TZ + tz, TX + tx, 1]]) faceWindows(ax, a0, a1, f, n, YB, YT, false);
+    putBox("trim", TX - tx - .35, YT - .3, TZ - tz - .35, TX + tx + .35, YT + .12, TZ + tz + .35);
+    balustrade("x", TX - tx, TX + tx, TZ - tz - .1, YT + .12); balustrade("x", TX - tx, TX + tx, TZ + tz + .1, YT + .12);
+    balustrade("z", TZ - tz, TZ + tz, TX - tx - .1, YT + .12); balustrade("z", TZ - tz, TZ + tz, TX + tx + .1, YT + .12);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]){ const x = TX + sx * (tx - 1.3), z = TZ + sz * (tz - 1.3);
+      solid(x - 1.2, z - 1.2, x + 1.2, z + 1.2, YT, YT + 3.2, stucco(CA), { tile: 3 }); putBox("trim", x - 1.4, YT + 3.1, z - 1.4, x + 1.4, YT + 3.4, z + 1.4);
+      for (const s of [-1, 1]){ putBox("pane", x - .35, YT + .9, z + s * 1.21 - .05, x + .35, YT + 2.5, z + s * 1.21 + .05); putBox("pane", x + s * 1.21 - .05, YT + .9, z - .35, x + s * 1.21 + .05, YT + 2.5, z + .35); }
+      const d = add(new THREE.SphereGeometry(1, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), white, x, YT + 3.4, z); d.scale.y = .7;
+      add(new THREE.SphereGeometry(.14, 8, 6), matTowerGold, x, YT + 4.2, z, false); }
+  }
+  const Y0 = YB + 4.72, hx = 5, hz = 4.5, Y1 = Y0 + 11, Y2 = Y1 + 4.6;
   solid(TX - hx, TZ - hz, TX + hx, TZ + hz, Y0, Y1, stucco(CA), { tile: 4 });
   for (const [ax, a0, a1, f, n] of [["x", TX - hx, TX + hx, TZ - hz, -1], ["x", TX - hx, TX + hx, TZ + hz, 1], ["z", TZ - hz, TZ + hz, TX - hx, -1], ["z", TZ - hz, TZ + hz, TX + hx, 1]]) faceWindows(ax, a0, a1, f, n, Y0, Y1, false);
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) putBox("trim", TX + sx * hx - .45, Y0, TZ + sz * hz - .45, TX + sx * hx + .45, Y1, TZ + sz * hz + .45);
@@ -747,8 +760,10 @@ function vinTower(TX, TZ, Y0){
   for (let k = 0; k < 8; k++){ const a = k / 8 * Math.PI * 2; add(new THREE.ConeGeometry(.11, .65, 6), white, TX + Math.sin(a) * 2.55, Y3 + 4.92, TZ + Math.cos(a) * 2.55); }
   { const d = add(new THREE.SphereGeometry(2, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), white, TX, Y3 + 4.6, TZ); d.scale.y = .85; }
   cyl(.66, .74, 1.6, Y3 + 6.1, 12); for (let k = 0; k < 6; k++){ const a = k / 6 * Math.PI * 2; putBox("pane", TX + Math.sin(a) * .7 - .1, Y3 + 6.4, TZ + Math.cos(a) * .7 - .1, TX + Math.sin(a) * .7 + .1, Y3 + 7.3, TZ + Math.cos(a) * .7 + .1); }
-  cyl(.82, .66, .22, Y3 + 7.7, 12); cyl(.05, .55, 10, Y3 + 7.92, 12);
-  for (let k = 0; k < 4; k++){ const a = k / 4 * Math.PI * 2 + Math.PI / 4; add(new THREE.ConeGeometry(.09, 1.3, 6), white, TX + Math.sin(a) * .62, Y3 + 8.6, TZ + Math.cos(a) * .62); }   // chóp nhỏ quanh chân kim
+  cyl(.82, .66, .22, Y3 + 7.7, 12);
+  for (let k = 0; k < 16; k++){ const a = k / 16 * Math.PI * 2, c = add(new THREE.ConeGeometry(.2, 1.7, 4), white, TX + Math.sin(a) * .62, Y3 + 8.55, TZ + Math.cos(a) * .62);   // vòng cánh hoa xoè quanh chân kim
+    c.rotation.set(Math.cos(a) * .6, 0, -Math.sin(a) * .6); }
+  cyl(.24, .34, 6.5, Y3 + 7.92, 14); cyl(.4, .4, .18, Y3 + 11, 14); cyl(.12, .24, 3.6, Y3 + 14.4, 12);                                 // trụ kim to (như ảnh) thu nhỏ dần
   add(new THREE.SphereGeometry(.24, 14, 10), matTowerGold, TX, Y3 + 18, TZ); add(new THREE.CylinderGeometry(.05, .05, 1.6, 6), matTowerGold, TX, Y3 + 18.9, TZ);
   { const sg = sunEmblem(1.15); for (const ry of [0, Math.PI / 2]){ const m = add(sg, matTowerGold, TX, Y3 + 20.4, TZ, false); m.rotation.y = ry; } }
 }
@@ -776,9 +791,10 @@ function arcSolid(cx, cz, r0, r1, a0, a1, y0, y1, mat, step = .26){   // khối 
 // ---------- TÒA I (cánh lối vào) + TÒA A (tháp): sảnh lớn đi xuyên tây → đông (z -2…4)
 building(-10, -5, 12, -2, 16, { faces: "n", roof: false, color: CA }); building(-10, 4, 12, 7, 16, { faces: "s", roof: false, color: CA });
 solid(-10, -2, 12, 4, 4.4, 16, stucco(CA), { tile: 4 }); faceWindows("z", -5, 7, -10, -1, 0, 16, false, 4.6); hipRoof(-10, -5, 12, 7, 16.08);
-building(12, -15, 27, -2, 22, { faces: "nswe", roof: false, color: CA }); building(12, 4, 27, 17, 22, { faces: "nswe", roof: false, color: CA });
-solid(12, -2, 27, 4, 4.4, 22, stucco(CA), { tile: 4 }); faceWindows("z", -2, 4, 27, 1, 0, 22, false, 4.6); faceWindows("z", -2, 4, 12, -1, 0, 22, false, 16.2); hipRoof(12, -15, 27, 17, 22.08);
-vinTower(19.5, 1, 22);
+// Tòa A là khối lớn nhất khuôn viên (ảnh thật: thân chính cao gấp đôi các toà hai bên, tầng lùi có chòi góc, tháp, vòng cánh hoa, kim + mặt trời vàng)
+building(12, -15, 27, -2, 30, { faces: "nswe", roof: false, color: CA }); building(12, 4, 27, 17, 30, { faces: "nswe", roof: false, color: CA });
+solid(12, -2, 27, 4, 4.4, 30, stucco(CA), { tile: 4 }); faceWindows("z", -2, 4, 27, 1, 0, 30, false, 4.6); faceWindows("z", -2, 4, 12, -1, 0, 30, false, 16.2); hipRoof(12, -15, 27, 17, 30.08);
+vinTower(19.5, 1, 30.08);
 plane(-10, -2, 27, 4, .06, mMarble, 2); deco(-10, -2, 27, 4, 4.25, 4.4, mCeil, { shadow: false });
 for (let x = -7; x < 26; x += 4) deco(x - .5, .5, x + .5, 1.5, 4.08, 4.11, mLightPanel, { shadow: false });
 solid(17, -1.6, 22, -.6, 0, 1.1, M({ map: texWood, color: 0xb08a60 }), { tile: 1.5 });                         // quầy lễ tân
