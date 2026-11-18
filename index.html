@@ -58,8 +58,13 @@
   .btn.ghost{ background:transparent; color:#eef1ea; border:1px solid rgba(255,255,255,.4); margin-left:10px; }
   .btn.ghost:hover{ background:rgba(255,255,255,.12); }
   #start.loading #matchopt, #start.loading #keylist, #start.loading #startbtns{ display:none; } #start:not(.loading) #loadmsg{ display:none; }
-  #loadmsg{ font-size:14px; letter-spacing:.12em; opacity:.8; margin:26px 0 22px; animation:ld 1.2s ease-in-out infinite alternate; }
-  @keyframes ld{ from{ opacity:.35; } to{ opacity:.9; } }
+  #loadmsg{ margin:26px 0 22px; }
+  #loadbar{ width:320px; max-width:80vw; height:6px; margin:12px auto 6px; background:rgba(255,255,255,.12); border-radius:3px; overflow:hidden; } #loadfill{ display:block; height:100%; width:0; background:linear-gradient(90deg,#ffcf5a,#ffe9a8); transition:width .15s; }
+  #loadtxt{ font-size:14px; letter-spacing:.1em; } #loadpct{ font-size:12px; opacity:.7; }
+  .sensq{ display:flex; align-items:center; gap:12px; justify-content:center; font-size:13px; margin:0 0 18px; } .sensq input[type=range], #sensrow input[type=range], .sensrow input[type=range]{ width:220px; }
+  .sensN{ width:64px; background:rgba(0,0,0,.35); color:#eef1ea; border:1px solid rgba(255,255,255,.3); border-radius:3px; padding:4px 6px; font:inherit; }
+  .sensrow{ display:flex; align-items:center; gap:14px; justify-content:center; font-size:13px; margin-bottom:20px; }
+  #start.loading .sensq{ display:none; }
   #settings{ z-index:30; } #settings .panel{ max-width:620px; width:92%; max-height:92vh; overflow:auto; }
   #bindlist{ display:grid; grid-template-columns:1fr 1fr; gap:6px 26px; text-align:left; font-size:13px; margin:18px 0; }
   .bindrow{ display:flex; justify-content:space-between; align-items:center; gap:10px; }
@@ -144,18 +149,20 @@
       <div id="modedesc"></div>
     </div>
     <div class="keys" id="keylist"></div>
-    <div id="loadmsg">Đang tải bản đồ và model…</div>
-    <div id="startbtns"><button class="btn" id="startBtn">VÀO TRẬN</button><button class="btn ghost" id="setBtn1">CÀI ĐẶT PHÍM</button></div>
+    <div id="loadmsg"><div id="loadtxt">Đang tải…</div><div id="loadbar"><i id="loadfill"></i></div><div id="loadpct">0%</div></div>
+    <div class="sensq"><span>Tốc độ chuột</span><input type="range" class="sensR" min="0.1" max="6" step="0.05"><input type="number" class="sensN" min="0.1" max="10" step="0.05"></div>
+    <div id="startbtns"><button class="btn" id="startBtn">VÀO TRẬN</button><button class="btn ghost" id="setBtn1">CÀI ĐẶT</button></div>
     <div class="note">Giữ chuột để xả đạn — súng giật lên rồi lắc ngang, hãy kéo chuột xuống để ghìm tâm.</div>
     <div class="note">Model 3D: “Fps Rig AKM”, “Fps Rig” (Glock) của J-Toastie và “Soldier” của Quaternius — CC-BY 3.0; “SWAT”, “Shotgun” của Quaternius — CC0. Nguồn: poly.pizza.</div>
   </div>
 </div>
-<div class="overlay hidden" id="pause"><div class="panel"><h1>TẠM DỪNG</h1><p>Bấm để quay lại trận.</p><button class="btn" id="resumeBtn">TIẾP TỤC</button><button class="btn ghost" id="setBtn2">CÀI ĐẶT PHÍM</button><div style="margin-top:14px"><button class="btn ghost" id="menuBtn" style="margin-left:0">VỀ MÀN HÌNH CHÍNH</button></div></div></div>
+<div class="overlay hidden" id="pause"><div class="panel"><h1>TẠM DỪNG</h1><p>Bấm để quay lại trận.</p><div class="sensq"><span>Tốc độ chuột</span><input type="range" class="sensR" min="0.1" max="6" step="0.05"><input type="number" class="sensN" min="0.1" max="10" step="0.05"></div><button class="btn" id="resumeBtn">TIẾP TỤC</button><button class="btn ghost" id="setBtn2">CÀI ĐẶT</button><div style="margin-top:14px"><button class="btn ghost" id="menuBtn" style="margin-left:0">VỀ MÀN HÌNH CHÍNH</button></div></div></div>
 <div class="overlay hidden" id="settings"><div class="panel">
-  <h1>CÀI ĐẶT PHÍM</h1>
+  <h1>CÀI ĐẶT</h1>
   <p style="margin:8px 0 0">Bấm vào ô phím rồi nhấn phím hoặc nút chuột mới. Esc để huỷ. Cài đặt được lưu cho lần chơi sau.</p>
   <div id="bindlist"></div>
-  <div id="sensrow"><span>Độ nhạy chuột</span><input type="range" id="sens" min="0.3" max="3" step="0.05"><b id="sensval"></b></div>
+  <div id="sensrow"><span>Tốc độ chuột</span><input type="range" id="sens" class="sensR" min="0.1" max="6" step="0.05"><input type="number" class="sensN" min="0.1" max="10" step="0.05"></div>
+  <div id="sensrow2" class="sensrow"><span>Tốc độ chuột khi ngắm / ống ngắm</span><input type="range" id="zsens" min="0.2" max="2" step="0.05"><b id="zsensval"></b></div>
   <button class="btn" id="setBack">XONG</button><button class="btn ghost" id="setReset">MẶC ĐỊNH</button>
   <div class="note">Phím mặc định giống Counter-Strike (Ctrl = ngồi, Shift = đi chậm, Q = súng vừa dùng, Tab = bảng điểm). Game tự vào toàn màn hình để Ctrl + W không đóng tab; nếu bạn thoát toàn màn hình mà vẫn giữ Ctrl để ngồi thì tránh bấm W cùng lúc, hoặc gán phím ngồi khác.</div>
 </div></div>
@@ -187,6 +194,11 @@ const _art0 = mulberry(90210); let ARTN = 0; const art = () => (ARTN++, _art0())
 const R = (a, b) => a + Math.random() * (b - a);
 const NOLOCK = location.search.includes("nolock");
 const $ = id => document.getElementById(id);
+// thanh tiến trình ở màn khởi động: game chỉ cho vào trận khi đã tải, dựng và "làm nóng" xong mọi thứ
+const LOADP = (f, txt) => { $("loadfill").style.width = (f * 100).toFixed(1) + "%"; $("loadpct").textContent = Math.round(f * 100) + "%"; if (txt) $("loadtxt").textContent = txt; };
+const yieldUI = () => new Promise(r => setTimeout(r, 0));
+const loadRange = (a, b, txt, n) => { let k = 0; LOADP(a, txt); return () => LOADP(a + (b - a) * Math.min(1, ++k / n), txt); };
+LOADP(.02, "Đang dựng bản đồ…"); await yieldUI();
 
 // ------------------------------------------------------------------ renderer
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
@@ -1569,6 +1581,7 @@ plantTufts();
 }
 { const R1 = 98969, A1 = 43913; if (RNGN > R1 || ARTN > A1) console.warn("map mới tiêu quá chuỗi ngẫu nhiên cũ", RNGN, ARTN); while (RNGN < R1) rng(); while (ARTN < A1) art(); }
 window.__M1 = [RNGN, ARTN];
+LOADP(.3, "Đang tải model súng…"); await yieldUI();
 const ZONES = [["Sảnh Tòa I – A", -10, -2, 27, 4], ["Hội trường (Trung tâm khởi nghiệp)", 12, 21, 27, 41], ["Tòa G", 31, -6, 50, 10], ["Tòa B", 31, 14, 51, 44], ["Quán cà phê (Tòa F)", -28, 41, -9, 55], ["Nhà thi đấu (Tòa K)", 80, 66, 102, 90],
   ["Sân trong Tòa C", -14, -36, 8, -14], ["Sân trong Tòa E (nhà ăn)", -14, 14, 8, 36], ["Tòa A", 12, -15, 27, 17], ["Tòa H", 35, -35, 51, -11], ["Mái sảnh đón", -19, -5, -10, 7],
   ["Khán đài ngoài trời", 31, 44, 51, 63.5], ["Vườn hồng", 12, 42, 28, 58], ["Sân vận động", 61, 11, 112, 42], ["Khán đài (Tòa L)", 70, 42, 102, 57], ["Ký túc xá (Tòa J)", 66, 100, 112, 136],
@@ -2571,22 +2584,27 @@ const GSV = { glock: "glock18", usp: "usp", p228: "p228", deagle: "deagle", elit
 const GSMDL = {};
 if (!new URLSearchParams(location.search).has("nogs")) try {
   const probe = await fetch("goldsrc/models/v_knife.mdl");
+  const step = loadRange(.32, .45, "Đang tải model súng…", Object.keys(GSV).length);
   if (probe.ok) await Promise.all(Object.entries(GSV).map(async ([id, n]) => {
     try { const r = n === "knife" ? probe : await fetch(`goldsrc/models/v_${n}.mdl`); if (r.ok) GSMDL[id] = parseMDL(await r.arrayBuffer()); }
     catch (e){ console.warn("v_" + n + ".mdl", e); }
+    step();
   }));
 } catch {}
 const GSWM = {};      // súng nằm trên đất: w_*.mdl
+{ const step = loadRange(.45, .5, "Đang tải súng trên đất…", Object.keys(GSV).length - 1);
 if (GSMDL.knife) await Promise.all(Object.entries(GSV).filter(([id]) => id !== "knife").map(async ([id, n]) => {
   try { const r = await fetch(`goldsrc/models/w_${n}.mdl`); if (r.ok) GSWM[id] = parseMDL(await r.arrayBuffer()); } catch (e){ console.warn("w_" + n + ".mdl", e); }
-}));
+  step();
+})); }
 // ---------- NHÂN VẬT GỐC COUNTER-STRIKE 1.6 (goldsrc/models/player/*, hostage.mdl, p_*.mdl lấy từ bản CS 1.6 trong Material/)
 // Cảnh sát: GIGN, SAS, GSG-9, SEAL (urban) · Khủng bố: Arctic, Guerilla, Leet, Phoenix (terror). Thân dưới chạy hoạt cảnh đi / chạy
 // (gait), thân trên (từ Bip01 Spine trở lên) chạy ref_aim / ref_shoot theo loại súng, cúi / ngẩng theo blend góc ngắm như trong CS.
 // Súng cầm tay p_*.mdl ghép xương cùng tên với người (bone merge). Thiếu file thì quay về model glTF.
 const CSM = {}, CS_TEAM = [["gign", "sas", "gsg9", "urban"], ["arctic", "guerilla", "leet", "terror"]];
 if (GSMDL.knife) try {
-  const get = async p => { const r = await fetch(p); if (!r.ok) throw new Error(p); return parseMDL(await r.arrayBuffer()); };
+  const files = 9 + new Set(Object.values(GSV)).size, step = loadRange(.5, .8, "Đang tải model nhân vật…", files);
+  const get = async p => { try { const r = await fetch(p); if (!r.ok) throw new Error(p); return parseMDL(await r.arrayBuffer()); } finally { step(); } };
   await Promise.all([...CS_TEAM.flat().map(async n => { CSM[n] = await get(`goldsrc/models/player/${n}/${n}.mdl`); }),
     (async () => { CSM.hostage = await get("goldsrc/models/hostage.mdl"); })(),
     ...[...new Set(Object.values(GSV))].map(async n => { try { CSM["p_" + n] = await get(`goldsrc/models/p_${n}.mdl`); } catch {} })]);
@@ -3097,9 +3115,9 @@ const ACTIONS = [["forward", "Tiến"], ["back", "Lùi"], ["left", "Sang trái"]
   ["fire", "Bắn"], ["ads", "Ngắm kỹ"], ["reload", "Nạp đạn"], ["slot1", "Súng chính"], ["slot2", "Súng lục"], ["slot3", "Dao"], ["slot4", "Lựu đạn"], ["last", "Súng vừa dùng"], ["buy", "Mua đồ"], ["use", "Dùng (con tin / đặt, gỡ bom)"], ["score", "Bảng điểm"]];
 const DEFAULT_BIND = { forward: "KeyW", back: "KeyS", left: "KeyA", right: "KeyD", jump: "Space", crouch: "ControlLeft", walk: "ShiftLeft", fire: "Mouse0", ads: "Mouse2",
   reload: "KeyR", slot1: "Digit1", slot2: "Digit2", slot3: "Digit3", slot4: "Digit4", last: "KeyQ", buy: "KeyB", use: "KeyE", score: "Tab" };
-const BIND = Object.assign({}, DEFAULT_BIND); let sens = 1;
-try { const sv = JSON.parse(localStorage.getItem("campus-strike-settings") || "null"); if (sv){ for (const k in DEFAULT_BIND) if (typeof sv.bind?.[k] === "string") BIND[k] = sv.bind[k]; if (sv.sens > 0) sens = +sv.sens; } } catch {}
-const saveSettings = () => { try { localStorage.setItem("campus-strike-settings", JSON.stringify({ bind: BIND, sens })); } catch {} };
+const BIND = Object.assign({}, DEFAULT_BIND); let sens = 1, zsens = 1;
+try { const sv = JSON.parse(localStorage.getItem("campus-strike-settings") || "null"); if (sv){ for (const k in DEFAULT_BIND) if (typeof sv.bind?.[k] === "string") BIND[k] = sv.bind[k]; if (sv.zsens > 0) zsens = +sv.zsens; if (sv.sens > 0) sens = +sv.sens; } } catch {}
+const saveSettings = () => { try { localStorage.setItem("campus-strike-settings", JSON.stringify({ bind: BIND, sens, zsens })); } catch {} };
 const isDown = a => keys.has(BIND[a]);
 function keyName(c){
   const M = { Mouse0: "Chuột trái", Mouse1: "Chuột giữa", Mouse2: "Chuột phải", Mouse3: "Chuột 4", Mouse4: "Chuột 5", Space: "Space", ShiftLeft: "Shift trái", ShiftRight: "Shift phải", ControlLeft: "Ctrl trái", ControlRight: "Ctrl phải",
@@ -4153,14 +4171,20 @@ function renderBinds(){
   $("bindlist").innerHTML = ACTIONS.map(([k, label]) => `<div class="bindrow"><span>${label}</span><button data-a="${k}" class="${capturing === k ? "cap" : ""}">${capturing === k ? "Nhấn phím…" : keyName(BIND[k])}</button></div>`).join("");
   $("keylist").innerHTML = ACTIONS.filter(a => !["back", "left", "right", "slot2", "slot3", "slot4"].includes(a[0])).map(([k, label]) =>
     `<div><b>${k === "forward" ? ["forward", "left", "back", "right"].map(x => keyName(BIND[x])).join(" ") : k === "slot1" ? ["slot1", "slot2", "slot3", "slot4"].map(x => keyName(BIND[x])).join(" · ") : keyName(BIND[k])}</b>${k === "forward" ? "Di chuyển" : k === "slot1" ? "Đổi súng" : label}</div>`).join("") + "<div><b>Esc</b>Tạm dừng / cài đặt</div>";
-  $("sens").value = sens; $("sensval").textContent = sens.toFixed(2);
+  syncSens();
 }
 $("bindlist").addEventListener("click", e => { if (window.__skipClick){ window.__skipClick = false; return; } const b = e.target.closest("button[data-a]"); if (!b) return; capturing = b.dataset.a; renderBinds(); });
-$("sens").addEventListener("input", e => { sens = +e.target.value; $("sensval").textContent = sens.toFixed(2); saveSettings(); });
+// mọi ô tốc độ chuột (màn khởi động, tạm dừng, cài đặt) dùng chung một giá trị
+function syncSens(){ for (const el of document.querySelectorAll(".sensR, .sensN")) if (document.activeElement !== el) el.value = +sens.toFixed(2);
+  $("zsens").value = zsens; $("zsensval").textContent = zsens.toFixed(2); }
+document.addEventListener("input", e => {
+  if (e.target.matches(".sensR, .sensN")){ const v = +e.target.value; if (!(v > 0)) return; sens = clamp(v, .05, 10); syncSens(); saveSettings(); }
+  else if (e.target.id === "zsens"){ zsens = +e.target.value; syncSens(); saveSettings(); } });
+for (const el of document.querySelectorAll(".sensq, #sensrow, #sensrow2")) el.addEventListener("mousedown", e => e.stopPropagation());   // kéo thanh trượt không làm bắt chuột / vào trận
 function openSettings(from){ setOpen = true; setFrom = from; $(from).classList.add("hidden"); $("settings").classList.remove("hidden"); renderBinds(); }
 $("setBtn1").onclick = () => openSettings("start"); $("setBtn2").onclick = () => openSettings("pause");
 $("setBack").onclick = () => { capturing = null; setOpen = false; $("settings").classList.add("hidden"); $(setFrom).classList.remove("hidden"); };
-$("setReset").onclick = () => { Object.assign(BIND, DEFAULT_BIND); sens = 1; capturing = null; saveSettings(); renderBinds(); };
+$("setReset").onclick = () => { Object.assign(BIND, DEFAULT_BIND); sens = 1; zsens = 1; capturing = null; saveSettings(); renderBinds(); };
 renderBinds();
 function showScore(on){
   const el = $("scoreboard"); if (!on){ el.style.display = "none"; return; }
@@ -4170,7 +4194,7 @@ function showScore(on){
   el.style.display = "flex";
 }
 document.addEventListener("mousemove", e => {
-  if (!locked || !player.alive) return; const s = .0021 * sens * lerp(1, W().adsSens || .6, adsK);
+  if (!locked || !player.alive) return; const s = .0021 * sens * lerp(1, (W().adsSens || .6) * zsens, adsK);
   yaw -= e.movementX * s; pitch = clamp(pitch - e.movementY * s, -1.5, 1.5);
   sway.x = clamp(sway.x - e.movementX * .00006, -.03, .03); sway.y = clamp(sway.y + e.movementY * .00006, -.03, .03);
 });
@@ -4208,7 +4232,7 @@ $("matchopt").addEventListener("input", e => {
   if (!(v >= 1)) return; OPT[obj ? "rounds" : "dmTarget"] = Math.min(obj ? 30 : 500, v); saveOpt();
   for (const b of $("optTarget").querySelectorAll("button")) b.classList.toggle("on", +b.dataset.v === OPT[obj ? "rounds" : "dmTarget"]);
 });
-renderOpts(); $("start").classList.remove("loading");   // tải xong mới hiện lựa chọn trận + nút vào trận
+renderOpts();
 $("startBtn").onclick = () => { $("start").classList.add("hidden"); setupMatch(); started = true; lock(); };
 $("resumeBtn").onclick = lock;
 $("menuBtn").onclick = () => { try { document.exitPointerLock?.(); } catch {} location.reload(); };   // kết thúc trận, về màn hình chọn chế độ
@@ -4287,6 +4311,33 @@ function frame(){
   followSun(camera.position.x, camera.position.z);
   if (POST && fxLevel > 0) POST.render(); else { renderer.clear(); renderer.render(scene, camera); }
   if (!scopeOn){ renderer.setRenderTarget(null); renderer.clearDepth(); renderer.render(vmScene, vmCamera); }
+}
+// ---------- làm nóng: giải nén hoạt cảnh nhân vật, biên dịch mọi shader (cả nhân vật / con tin / súng chưa xuất hiện), đưa texture
+// lên GPU và vẽ thử bốn hướng. Không làm thì những thứ này chạy lần đầu ngay giữa trận → giật mạnh lúc mới vào.
+{
+  LOADP(.8, "Đang chuẩn bị nhân vật…"); await yieldUI();
+  const temp = [];
+  if (CS_OK){
+    const exts = [...new Set(Object.values(CS_EXT))], want = ["idle1", "walk", "run", "death1", "death2", "death3", "gutshot", "head", "back", "left", "right", ...exts.flatMap(e => ["ref_aim_" + e, "ref_shoot_" + e])];
+    for (const n of CS_TEAM.flat()){ const d = CSM[n], I = csInfo(d); for (const w of want){ const i = I.si[w]; if (i == null) continue; const q = d.seqs[i]; for (let k = 0; k < q.nblends; k++) q.blend(k); } await yieldUI(); }
+    const hi = csInfo(CSM.hostage); for (const w of ["idle1", "walk", "run", "fear1"]) if (hi.si[w] != null) CSM.hostage.seqs[hi.si[w]].pose;
+    const saved = csPick.slice(), guns = ["ak47", "m4a1", "awp", "usp", "glock", "deagle", "mp5", "m3"].map(id => IDX[id]).filter(i => i != null);
+    for (let t = 0; t < 2; t++) for (let k = 0; k < 4; k++){ const s2 = makeSoldierCS(t, {}); csSetGun(s2, guns[(t * 4 + k) % guns.length]);
+      s2.root.position.set(camera.position.x - 3 + k * 2, 0, camera.position.z - 6 - t * 2); poseCS(s2, .016, 0, 1, 0, false); temp.push(s2.root); }
+    csPick = saved;
+    const th = { root: new THREE.Group() }; makeHostageCS(th); th.root.position.set(camera.position.x, 0, camera.position.z - 4); scene.add(th.root); temp.push(th.root);
+  }
+  LOADP(.88, "Đang biên dịch shader…"); await yieldUI();
+  const vis = vm.map(v => v.root.visible); vm.forEach(v => { v.root.visible = true; });
+  renderer.compile(scene, camera); renderer.compile(vmScene, vmCamera);
+  const seen = new Set(); for (const sc of [scene, vmScene]) sc.traverse(o => { if (!o.material) return; for (const m of Array.isArray(o.material) ? o.material : [o.material])
+    for (const k of ["map", "normalMap", "bumpMap", "alphaMap", "emissiveMap", "roughnessMap"]){ const t = m[k]; if (t && !seen.has(t)){ seen.add(t); renderer.initTexture(t); } } });
+  LOADP(.92, "Đang vẽ thử…"); await yieldUI();
+  for (let i = 0; i < 4; i++){ camera.rotation.set(0, yaw + i * Math.PI / 2, 0); camera.updateMatrixWorld();
+    if (POST) POST.render(); else { renderer.clear(); renderer.render(scene, camera); } renderer.clearDepth(); renderer.render(vmScene, vmCamera); LOADP(.92 + (i + 1) * .02); await yieldUI(); }
+  camera.rotation.set(0, yaw, 0); vm.forEach((v, i) => { v.root.visible = vis[i]; });
+  for (const r of temp) scene.remove(r);
+  LOADP(1, "Sẵn sàng"); $("start").classList.remove("loading");
 }
 frame();
 window.__g = { get audio(){ return actx && { state: actx.state, clips: Object.fromEntries(Object.entries(clips).map(([k, v]) => [k, v.map(b => { const d = b.getChannelData(0); let p = 0; for (let i = 0; i < d.length; i++) p = Math.max(p, Math.abs(d[i])); return [+b.duration.toFixed(2), +p.toFixed(2)]; })])) }; }, inv, IDX, WEAPONS, buyKey, toggleBuy, get money(){ return money; }, set money(v){ money = v; }, get cur(){ return cur; }, get nades(){ return gren.he; }, gren, EQUIP, get helmet(){ return helmet; }, get defuseKit(){ return defuseKit; }, liveNades, BIND, press, release, keys, vm, GL, tick, score, player, bots, nodes, colliders, fire, switchTo, startReload, recoil, get yaw(){ return yaw; }, set yaw(v){ yaw = v; }, get pitch(){ return pitch; }, set pitch(v){ pitch = v; }, set held(v){ fireHeld = v; firePressed = v; }, camera, wst,
