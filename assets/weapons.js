@@ -62,6 +62,10 @@ export const WEAPON_CATALOG = [
   copy(nade, { id: "flash", name: "Flashbang", kind: "flash", price: 200, max: 2 }),
   copy(nade, { id: "smoke", name: "Smoke Grenade", kind: "smoke", price: 300, max: 1 }),
 ];
+// pen: phần sát thương xuyên qua giáp (= 0,5 × armor ratio của CS 1.6). AWP gần như xuyên hết → trúng thân là chết kể cả có giáp.
+const PEN = { glock: .525, usp: .5, p228: .625, deagle: .75, elite: .525, fiveseven: .75, m3: .5, xm1014: .5, mac10: .475, tmp: .5, mp5: .5, ump45: .5, p90: .75,
+  galil: .775, famas: .7, ak47: .775, scout: .85, m4a1: .7, sg552: .7, aug: .7, awp: .975, sg550: .725, g3sg1: .825, m249: .75, knife: .85, he: .5 };
+for (const w of WEAPON_CATALOG) w.pen = PEN[w.id] ?? .5;
 
 // Mục trang bị không phải một khẩu súng trong tay.
 export const EQUIP = [

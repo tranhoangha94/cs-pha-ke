@@ -65,6 +65,10 @@
   .sensN{ width:64px; background:rgba(0,0,0,.35); color:#eef1ea; border:1px solid rgba(255,255,255,.3); border-radius:3px; padding:4px 6px; font:inherit; }
   .sensrow{ display:flex; align-items:center; gap:14px; justify-content:center; font-size:13px; margin-bottom:20px; }
   #start.loading .sensq{ display:none; }
+  .gfx h2{ font-size:15px; letter-spacing:.12em; margin:6px 0 10px; } .gfxrow{ display:flex; align-items:center; justify-content:center; gap:14px; font-size:13px; margin-bottom:10px; }
+  .gfxrow span{ min-width:110px; text-align:right; } .gfxrow select{ background:rgba(0,0,0,.4); color:#eef1ea; border:1px solid rgba(255,255,255,.3); border-radius:3px; padding:5px 8px; font:inherit; min-width:300px; }
+  #gNote button{ margin-left:8px; padding:6px 14px; font-size:12px; }
+  #fpsbox{ position:absolute; top:196px; left:16px; width:150px; text-align:center; font-size:12px; font-variant-numeric:tabular-nums; opacity:.85; display:none; }
   #settings{ z-index:30; } #settings .panel{ max-width:620px; width:92%; max-height:92vh; overflow:auto; }
   #bindlist{ display:grid; grid-template-columns:1fr 1fr; gap:6px 26px; text-align:left; font-size:13px; margin:18px 0; }
   .bindrow{ display:flex; justify-content:space-between; align-items:center; gap:10px; }
@@ -115,6 +119,7 @@
   <div class="ch" id="ch-t"></div><div class="ch" id="ch-b"></div><div class="ch" id="ch-l"></div><div class="ch" id="ch-r"></div><div class="ch" id="ch-dot"></div>
   <canvas id="radar" width="150" height="150"></canvas>
   <div id="zone"></div>
+  <div id="fpsbox"></div>
   <div id="score"><div class="scrow"><small class="b" id="nb">ĐỘI XANH</small><span class="b" id="sb">0</span><span id="rtime">:</span><span class="r" id="sr">0</span><small class="r" id="nr">ĐỘI ĐỎ</small></div><div id="sub"></div></div>
   <div id="obj"></div>
   <div id="prog"><span id="proglab"></span><div><i id="progfill"></i></div></div>
@@ -163,6 +168,14 @@
   <div id="bindlist"></div>
   <div id="sensrow"><span>Tốc độ chuột</span><input type="range" id="sens" class="sensR" min="0.1" max="6" step="0.05"><input type="number" class="sensN" min="0.1" max="10" step="0.05"></div>
   <div id="sensrow2" class="sensrow"><span>Tốc độ chuột khi ngắm / ống ngắm</span><input type="range" id="zsens" min="0.2" max="2" step="0.05"><b id="zsensval"></b></div>
+  <div class="gfx"><h2>ĐỒ HỌA</h2>
+    <div class="gfxrow"><span>Độ phân giải</span><select id="gRes"><option value="0">Theo màn hình</option><option value="2160">3840 × 2160 (4K)</option><option value="1440">2560 × 1440</option>
+      <option value="1080">1920 × 1080</option><option value="900">1600 × 900</option><option value="720">1280 × 720</option><option value="540">960 × 540</option><option value="360">640 × 360</option></select></div>
+    <div class="gfxrow"><span>Chất lượng</span><select id="gQ"><option value="high">Cao — bóng mềm, che khuất môi trường, quầng sáng</option><option value="medium">Vừa — bóng thường, che khuất nhẹ</option><option value="low">Thấp — bóng thường, không hậu kỳ</option></select></div>
+    <div class="gfxrow"><span>Giới hạn FPS</span><select id="gFps"><option value="0">Không giới hạn</option><option value="144">144</option><option value="120">120</option><option value="60">60</option><option value="30">30</option></select></div>
+    <div class="gfxrow"><span>Hiện FPS</span><input type="checkbox" id="gShow"></div>
+    <div class="note" id="gNote"></div>
+  </div>
   <button class="btn" id="setBack">XONG</button><button class="btn ghost" id="setReset">MẶC ĐỊNH</button>
   <div class="note">Phím mặc định giống Counter-Strike (Ctrl = ngồi, Shift = đi chậm, Q = súng vừa dùng, Tab = bảng điểm). Game tự vào toàn màn hình để Ctrl + W không đóng tab; nếu bạn thoát toàn màn hình mà vẫn giữ Ctrl để ngồi thì tránh bấm W cùng lúc, hoặc gán phím ngồi khác.</div>
 </div></div>
@@ -202,7 +215,12 @@ LOADP(.02, "Đang dựng bản đồ…"); await yieldUI();
 
 // ------------------------------------------------------------------ renderer
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+// cấu hình đồ hoạ: độ phân giải vẽ (chiều cao khung hình, rồi phóng ra cả cửa sổ), chất lượng (đổi thì tải lại trang), giới hạn FPS, hiện FPS
+const GFX = Object.assign({ res: 0, q: "high", fps: 0, show: false }, (() => { try { return JSON.parse(localStorage.getItem("campus-strike-gfx") || "{}"); } catch { return {}; } })());
+const saveGfx = () => { try { localStorage.setItem("campus-strike-gfx", JSON.stringify(GFX)); } catch {} };
+const pixelRatioFor = () => GFX.res ? Math.min(4, GFX.res / innerHeight) : Math.min(devicePixelRatio, 1.5);
+renderer.setPixelRatio(pixelRatioFor());
+addEventListener("resize", () => renderer.setPixelRatio(pixelRatioFor()));     // đăng ký trước các xử lý resize khác
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.AgXToneMapping; renderer.toneMappingExposure = 1.15;   // AgX (cách Blender dùng): màu nắng / tường trắng tự nhiên hơn ACES
@@ -210,7 +228,7 @@ renderer.autoClear = false;
 $("app").appendChild(renderer.domElement);
 // bóng đổ mềm kiểu PCSS cho nắng (thay bộ lọc PCF trong getShadow): tìm vật che quanh điểm, bóng sắc ở chân vật và nhoè dần
 // theo khoảng cách tới vật che — như bóng thật dưới mặt trời. Khung bóng ±64 m (128 m), chiều sâu 20…360 m. ?nopcss để tắt.
-if (!location.search.includes("nopcss")){
+if (!location.search.includes("nopcss") && GFX.q === "high"){
   const C = THREE.ShaderChunk, src = C.shadowmap_pars_fragment;
   const lib = `
     #define PCSS_N 12
@@ -252,7 +270,7 @@ const vmFlashLight = new THREE.PointLight(0xffc070, 0, 2.5); vmScene.add(vmFlash
 scene.add(new THREE.HemisphereLight(0xb7d4ee, 0x6a5a48, .55));
 const sun = new THREE.DirectionalLight(0xffe0b8, 2.45);
 sun.position.set(-86, 112, 72); sun.castShadow = true;
-sun.shadow.mapSize.set(4096, 4096);
+sun.shadow.mapSize.set(GFX.q === "low" ? 2048 : 4096, GFX.q === "low" ? 2048 : 4096);
 Object.assign(sun.shadow.camera, { left: -64, right: 64, top: 64, bottom: -64, near: 20, far: 360 });
 const SUN_OFF = sun.position.clone();
 function followSun(x, z){   // khung bóng ±64 m đi theo người chơi, bước 8 m để bóng không rung
@@ -3323,7 +3341,8 @@ function playerRay(o, d, w, muz, tracer){
   if (h){
     end.copy(h.point); const bot = h.object.userData.bot, part = h.object.userData.hit;
     const sg = w.cat === "shotguns", range = sg ? 26 : w.cat === "rifles" || w.cat === "mgs" ? 420 : 220;
-    let dmg = w.dmg * (part === "head" ? w.head : part === "limb" ? .75 : 1) * clamp(1.05 - h.distance / range, sg ? .25 : .6, 1);
+    const snipe = w.mesh === "sniper" || w.mesh === "scout" || w.id === "g3sg1" || w.id === "sg550";                  // súng bắn tỉa CS gần như không giảm sát thương theo tầm
+    let dmg = w.dmg * (part === "head" ? w.head : part === "limb" ? .75 : 1) * (snipe ? 1 : clamp(1.05 - h.distance / range, sg ? .25 : .6, 1));
     if (part === "head" && (w.cat === "rifles" || w.cat === "mgs" || w.id === "deagle")) dmg = Math.max(dmg, 120);   // như CS 1.6: súng trường / Deagle trúng đầu là chết
     damage(bot, dmg, player, part === "head", w.id); blood(end, d, bot.pos.y, part === "head" ? 14 : 9); res = part === "head" ? 2 : 1;
   } else if (wall){ end.copy(o).addScaledVector(d, maxT); bulletHole(end, wn); puff(end, 0xcfc6b4, .3, 2); sfx.impact(clamp(1 - maxT / 40, 0, 1), 0); }
@@ -3518,7 +3537,7 @@ function botShoot(b, t, d){
   let end = aimP;
   if (hit && (!wall || wall.t > d - 1)){
     const head = Math.random() < .09, base = w.dmg * (w.pellets || 1) * (w.cat === "shotguns" ? clamp(1 - d / 22, .12, 1) : 1);
-    damage(t, t.isPlayer ? base * (head ? 1.1 : R(.32, .48)) : base * (head ? 2.6 : R(.62, .87)), b, head, w.id); if (!t.isPlayer) blood(aimP, dir, t.pos.y, 6); }
+    damage(t, t.isPlayer ? base * (head ? 1.1 : w.id === "awp" ? R(.92, 1) : R(.32, .48)) : base * (head ? 2.6 : w.id === "awp" ? R(.92, 1) : R(.62, .87)), b, head, w.id); if (!t.isPlayer) blood(aimP, dir, t.pos.y, 6); }
   else if (wall){ end = from.clone().addScaledVector(dir, wall.t); bulletHole(end, [wall.nx, wall.ny, wall.nz]); puff(end, 0xcfc6b4, .28, 1); }
   else end = from.clone().addScaledVector(dir, 120);
   spawnTracer(from, end);
@@ -3531,16 +3550,18 @@ function botShoot(b, t, d){
 // SÁT THƯƠNG / ĐIỂM
 // ============================================================================
 const score = [0, 0]; let matchOver = 0;
+// giáp như CS 1.6: chỉ chặn phần (1 − pen) của sát thương, tốn 0,5 điểm giáp cho mỗi điểm chặn được
+const armorPen = id => WEAPONS[IDX[id]]?.pen ?? .5;
 function damage(victim, dmg, attacker, head, weapon){
   if (!victim.alive || matchOver) return;
   if (victim.isPlayer){
     if (head && helmet) dmg *= .5;
-    if (armor > 0){ const ab = Math.min(armor, dmg * .5); armor -= ab; dmg -= ab; if (armor <= 0) helmet = false; }
+    if (armor > 0){ const keep = dmg * armorPen(weapon), ab = Math.min(armor * 2, dmg - keep); armor = Math.max(0, armor - ab * .5); dmg -= ab; if (armor <= 0) helmet = false; }
     player.health -= dmg; player.lastHurt = 0; hudHp(); sfx.hurt(); const v = $("vig"); v.classList.add("hit"); setTimeout(() => v.classList.remove("hit"), 90);
     recoil.tp += .012; recoil.ty += R(-.012, .012);
     if (player.health <= 0){ player.alive = false; player.deaths++; deathT = 3.2; vm[cur].root.visible = false; closeBuy(); onKill(attacker, victim, head); }
   } else {
-    if (victim.armor > 0 && (!head || victim.helmet && dmg < 100)){ const ab = Math.min(victim.armor, dmg * .35); victim.armor -= ab; dmg -= ab; }
+    if (victim.armor > 0 && (!head || victim.helmet)){ const keep = dmg * armorPen(weapon), ab = Math.min(victim.armor * 2, dmg - keep); victim.armor = Math.max(0, victim.armor - ab * .5); dmg -= ab; }
     victim.hp -= dmg; if (!victim.target){ victim.lookYaw = Math.atan2(attacker.pos.x - victim.pos.x, attacker.pos.z - victim.pos.z); victim.yaw = turnTo(victim.yaw, victim.lookYaw, 1.6); victim.senseT = 0; }
     if (victim.hp <= 0){ victim.alive = false; victim.deaths++; victim.deadT = 0; victim.speed = 0;
       const ax = attacker.pos.x - victim.pos.x, az = attacker.pos.z - victim.pos.z; victim.fallDir = (ax * Math.sin(victim.yaw) + az * Math.cos(victim.yaw)) > 0 ? 1 : -1; onKill(attacker, victim, head); }
@@ -4181,6 +4202,13 @@ document.addEventListener("input", e => {
   if (e.target.matches(".sensR, .sensN")){ const v = +e.target.value; if (!(v > 0)) return; sens = clamp(v, .05, 10); syncSens(); saveSettings(); }
   else if (e.target.id === "zsens"){ zsens = +e.target.value; syncSens(); saveSettings(); } });
 for (const el of document.querySelectorAll(".sensq, #sensrow, #sensrow2")) el.addEventListener("mousedown", e => e.stopPropagation());   // kéo thanh trượt không làm bắt chuột / vào trận
+function syncGfx(){ $("gRes").value = GFX.res; $("gQ").value = GFX.q; $("gFps").value = GFX.fps; $("gShow").checked = GFX.show; $("fpsbox").style.display = GFX.show ? "block" : "none"; }
+$("gRes").onchange = e => { GFX.res = +e.target.value; saveGfx(); dispatchEvent(new Event("resize")); };
+$("gFps").onchange = e => { GFX.fps = +e.target.value; saveGfx(); };
+$("gShow").onchange = e => { GFX.show = e.target.checked; saveGfx(); syncGfx(); };
+$("gQ").onchange = e => { GFX.q = e.target.value; saveGfx();
+  $("gNote").innerHTML = 'Chất lượng mới áp dụng khi tải lại trang (trận đang chơi sẽ bắt đầu lại).<button class="btn ghost" id="gReload">TẢI LẠI NGAY</button>'; $("gReload").onclick = () => location.reload(); };
+syncGfx();
 function openSettings(from){ setOpen = true; setFrom = from; $(from).classList.add("hidden"); $("settings").classList.remove("hidden"); renderBinds(); }
 $("setBtn1").onclick = () => openSettings("start"); $("setBtn2").onclick = () => openSettings("pause");
 $("setBack").onclick = () => { capturing = null; setOpen = false; $("settings").classList.add("hidden"); $(setFrom).classList.remove("hidden"); };
@@ -4253,7 +4281,7 @@ camera.position.set(player.pos.x, 1.62, player.pos.z); camera.rotation.set(0, ya
 
 // ---------- hậu kỳ: che khuất môi trường (N8AO, đọc từ depth nên không vẽ cảnh thêm lần nào), quầng sáng nhẹ cho
 // đèn / mặt trời, tone map ACES rồi chỉnh màu (tương phản, bão hoà, vùng tối ngả lạnh, vùng sáng ngả ấm). ?nofx để tắt.
-const POST = location.search.includes("nofx") ? null : (() => {
+const POST = location.search.includes("nofx") || GFX.q === "low" ? null : (() => {
   const W = () => Math.floor(innerWidth * renderer.getPixelRatio()), H = () => Math.floor(innerHeight * renderer.getPixelRatio());
   const rt = new THREE.WebGLRenderTarget(W(), H(), { type: THREE.HalfFloatType });
   const composer = new EffectComposer(renderer, rt);
@@ -4272,6 +4300,7 @@ const POST = location.search.includes("nofx") ? null : (() => {
         c = c + (c - c * c) * .16 - .008;                                                   // tương phản chữ S nhẹ
         gl_FragColor = vec4(clamp(c, 0., 1.), 1.); }` });
   composer.addPass(grade);
+  if (GFX.q === "medium"){ bloom.enabled = false; ao.setQualityMode("Low"); ao.configuration.halfRes = true; }
   addEventListener("resize", () => { composer.setSize(innerWidth, innerHeight); ao.setSize(W(), H()); });
   return { render(){ renderer.autoClear = true; composer.render(); renderer.autoClear = false; }, composer, ao, bloom, grade };   // N8AO vẽ cảnh vào target riêng và cần xoá tự động
 })();
@@ -4299,8 +4328,12 @@ function tick(dt){
   updateFloorGuns(dt);
   updateFx(dt); hudCross(); hudRadar();
 }
-function frame(){
+let frameLast = 0, fpsN = 0, fpsT = 0;
+function frame(now = 0){
   requestAnimationFrame(frame);
+  if (GFX.fps && now - frameLast < 1000 / GFX.fps - 1.5) return;                  // giới hạn FPS: bỏ qua lượt vẽ tới hạn
+  frameLast = now; fpsN++;
+  if (now - fpsT >= 500){ if (GFX.show) $("fpsbox").textContent = Math.round(fpsN * 1000 / (now - fpsT)) + " FPS"; fpsN = 0; fpsT = now; }
   const raw = Math.min(.2, clock.getDelta()), wt = clock.elapsedTime;
   adaptFx(raw);
   if (skyU) skyU.time.value = wt;
