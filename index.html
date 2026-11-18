@@ -594,7 +594,7 @@ function lamp(x, z, y0 = 0){
 // Quy ước: x tăng về phía đông, z tăng về phía nam (phía hồ). Trên bản đồ chính thức: Cổng Đại Lễ ở dưới = phía TÂY,
 // Cổng San Hô ở trên = phía ĐÔNG, vùng ô trống bên phải = bãi cỏ sát hồ (phía NAM) — đã bỏ theo yêu cầu.
 //   Trục chính tây → đông: Cổng Đại Lễ → Quảng trường (đài phun nước + hàng cột bán nguyệt) → sân bậc trước nhà
-//   → Tòa I (cánh lối vào, mái sảnh đón) → Tòa A (tháp) → Tòa C (thư viện) → đường nội bộ → sân vận động → Cổng San Hô.
+//   → Tòa I (cánh lối vào, mái sảnh đón) → Tòa A (tháp, thư viện) → Tòa C (ngay trước khu xuất phát Cảnh sát) → đường nội bộ → sân vận động → Cổng San Hô.
 //   Quanh A: G (tây bắc) và E (tây nam) có sân trong; H (đông bắc); B (đông nam, hội trường mái vòm); F đứng riêng góc tây nam.
 //   Bãi gửi xe phía bắc. Đầu đông: sân vận động, Tòa L (khán đài + nhà) sát đường chạy phía nam, Tòa K (nhà thi đấu), Tòa J (ký túc xá chữ U) bên hồ.
 //   Khán đài ngoài trời (A) trước hội trường, mở về phía hội trường; vườn hồng (B) phía đông nó.
@@ -807,12 +807,12 @@ for (const [z1, z2] of [[-12.5, -7], [8, 13.5]]) building(-68, z1, -63, z2, 3.6,
   for (let i = 0; i < cols.length - 1; i++){ const [x0, z0] = cols[i], [x1, z1] = cols[i + 1]; if (Math.hypot(x1 - x0, z1 - z0) > 5) continue; const b = add(new THREE.BoxGeometry(Math.hypot(x1 - x0, z1 - z0) + .5, .55, .9), matCornice, (x0 + x1) / 2, 4.47, (z0 + z1) / 2); b.rotation.y = -Math.atan2(z1 - z0, x1 - x0); }
   for (const [x, z] of [[FX + 8, FZ - 9], [FX + 8, FZ + 9]]) planter(x, z); }
 
-// ---------- TÒA G (tây bắc) + TÒA E (tây nam): khối có sân trong · TÒA H (đông bắc)
+// ---------- TÒA G (tây bắc, có hội trường) + TÒA E (tây nam): khối có sân trong · TÒA H (đông bắc)
 courtyardBlock(-14, -36, 8, -14, 16, 6, -25);
 courtyardBlock(-14, 14, 8, 36, 16, 6, 25);
 building(35, -35, 51, -11, 14, { faces: "nsew", color: CA }); cornerPavilion(38.4, -31.6, 14.08); cornerPavilion(47.6, -31.6, 14.08);
 
-// ---------- TÒA C: THƯ VIỆN (vào được) — kệ sách, bàn đọc, quầy mượn sách
+// ---------- TÒA C (vào được; đứng ở khu xuất phát Cảnh sát nhìn thẳng là thấy) — nội thất phòng đọc — kệ sách, bàn đọc, quầy mượn sách
 hollow(31, -6, 50, 10, 14, { doors: [["w", 0, 3], ["e", 0, 3], ["n", 39, 42]], floor: mFloorWood, light: 22 });
 for (const z of [-4.4, -2.2, 6.2, 8.4]) for (const [a, b] of [[32.4, 38.6], [42.4, 48.6]]){ solid(a, z - .3, b, z + .3, 0, 2.2, mShelf, { tile: 1.5 });
   for (let x = a + .2; x < b - .2; x += .55) deco(x, z - .32, x + .45, z + .32, .3 + (x * 7 % 3 | 0) * .62, .82 + (x * 7 % 3 | 0) * .62, mBookCols[(x * 3 | 0) % 5], { shadow: false }); }
@@ -1018,16 +1018,17 @@ const boxAt = (w, h, d, x, y, z) => { const g = boxGeo(w, h, d, 4); g.translate(
 
 // cột thức Ionic: chân đế (plinth + gờ tiện), thân có 24 rãnh dọc và thu nhỏ dần lên trên, đầu cột có hai cuộn xoắn
 const COLG = new Map();
-function columnGeo(h, r){ const key = h + "|" + r; if (COLG.has(key)) return COLG.get(key);
+function columnGeo(h, r, noCap = false){ const key = h + "|" + r + "|" + noCap; if (COLG.has(key)) return COLG.get(key);
   const P = [boxAt(r * 2.7, r * .42, r * 2.7, 0, r * .21, 0)], y0 = r * .42;
   P.push(lathe([[r * 1.3, y0], [r * 1.34, y0 + r * .1], [r * 1.3, y0 + r * .2], [r * 1.12, y0 + r * .24], [r * 1.08, y0 + r * .34], [r * 1.14, y0 + r * .42], [r * 1.1, y0 + r * .5], [r * 1.0, y0 + r * .54]]));
-  const ys = y0 + r * .54, capH = r * 1.25, ye = h - capH, L = ye - ys;
+  const ys = y0 + r * .54, capH = noCap ? 0 : r * 1.25, ye = h - capH, L = ye - ys;
   const sh = new THREE.CylinderGeometry(1, 1, L, 96, 8, true); sh.translate(0, ys + L / 2, 0);
   const p = sh.attributes.position;
   for (let i = 0; i < p.count; i++){ const x = p.getX(i), y = p.getY(i), z = p.getZ(i), t = (y - ys) / L, th = Math.atan2(z, x);
     const rad = r * (1 - .13 * Math.pow(Math.max(0, (t - .3) / .7), 1.6)) * (1 - .05 * Math.pow(Math.max(0, Math.cos(th * 24)), 2));
     p.setXYZ(i, Math.cos(th) * rad, y, Math.sin(th) * rad); }
   sh.computeVertexNormals(); P.push(sh);
+  if (noCap){ const g = mergeParts(P); COLG.set(key, g); return g; }
   const rt = r * .87;
   P.push(lathe([[rt, ye], [rt * 1.08, ye + r * .08], [rt * 1.02, ye + r * .14], [rt * 1.25, ye + r * .32], [rt * 1.3, ye + r * .5], [rt * 1.1, ye + r * .62], [.001, ye + r * .64]]));
   P.push(boxAt(r * 2.5, r * .22, r * 2.5, 0, h - r * .11, 0));
@@ -1073,10 +1074,6 @@ function statueGeo(pose){ if (STG.has(pose)) return STG.get(pose);
 const urnGeo = mergeParts([lathe([[.001, 0], [.22, 0], [.24, .06], [.12, .12], [.1, .2], [.24, .38], [.3, .55], [.26, .72], [.16, .8], [.2, .86], [.001, .9]], 20), (() => { const g = new THREE.SphereGeometry(.08, 10, 8); g.translate(0, .96, 0); return g; })()]);
 const pedG = mergeParts([[1.3, .28, 1.3, .14], [1.12, .12, 1.12, .34], [.9, 1.15, .9, .975], [1.1, .12, 1.1, 1.61], [1.24, .14, 1.24, 1.74]].map(([w, h, d, y]) => boxAt(w, h, d, 0, y, 0)));
 function statueOn(x, z, ry, pose, s = 1.12){ bake.at(pedG, mArchTrim, x, 0, z, ry); bake.at(statueGeo(pose), mMarbleW, x, 1.81, z, ry, s); solid(x - .65, z - .65, x + .65, z + .65, 0, 1.81 + 1.8 * s, null); }
-function textTex(str){ const c = document.createElement("canvas"); c.width = 1024; c.height = 128; const g = c.getContext("2d");
-  g.font = '600 76px "Times New Roman", Georgia, serif'; g.textAlign = "center"; g.textBaseline = "middle";
-  g.fillStyle = "#e6b54c"; g.shadowColor = "rgba(70,45,0,.65)"; g.shadowBlur = 3; g.shadowOffsetY = 2; g.fillText(str.split("").join(" "), 512, 68);
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; return t; }
 
 // khải hoàn môn: thân là một khối đùn có các cửa vòm khoét từ dưới lên, cột Ionic hai mặt, diềm mái, tầng attic, tượng trên đỉnh (tuỳ chọn)
 function triumph(o){
@@ -1106,8 +1103,7 @@ function triumph(o){
   const At = Hb + 1.37, [aw, ah] = o.attic;
   box("t", aw + .3, .25, D + .4, 0, At + .125, 0); box("a", aw, ah, D + .1, 0, At + ah / 2, 0); box("t", aw + .5, .28, D + .6, 0, At + ah + .14, 0);
   const top = At + ah + .28;
-  if (o.text){ const tm = withEnv(M({ map: textTex(o.text), alphaTest: .45, roughness: .32, metalness: .75 }), 1.2);
-    for (const fz of [-1, 1]){ const pl = new THREE.PlaneGeometry(aw * .86, aw * .86 / 8); if (fz < 0) pl.rotateY(Math.PI); pl.translate(0, At + ah / 2, fz * (D / 2 + .06)); bake.put(pl, tm, m4); } }
+  for (const fz of [-1, 1]) box("t", aw * .82, ah * .5, .1, 0, At + ah / 2, fz * (D / 2 + .08));                          // ô trơn trên tầng attic (không chữ)
   for (const s of [-1, 1]){ const u = urnGeo.clone(); u.scale(1.3, 1.3, 1.3); u.translate(s * (W2 - .55), At, 0); P.m.push(u); }                   // bình trang trí hai đầu
   if (o.statue){ box("t", 2.2, .3, 1.8, 0, top + .15, 0); box("a", 1.7, 1.0, 1.4, 0, top + .8, 0); box("t", 2.0, .2, 1.6, 0, top + 1.4, 0);
     const st = statueGeo(o.pose || 0).clone(); st.scale(o.statue, o.statue, o.statue); st.translate(0, top + 1.5, 0); P.m.push(st); }
@@ -1122,7 +1118,7 @@ function triumph(o){
 }
 
 // Cổng Đại Lễ (mặt trong nhìn về quảng trường), cánh cổng sắt khép trong lòng ba cửa vòm
-{ const G = triumph({ x: -110, z: 1, ry: Math.PI / 2, W: 24, D: 3.2, wc: 7, hc: 6.6, sides: [[-7.7, 2.9, 3.8], [7.7, 2.9, 3.8]], ped: .8, colH: 9.9, colR: .4, cols: [-11.15, -4.4, 4.4, 11.15], attic: [16, 2.9], text: "ĐẠI HỌC VINUNI" });
+{ const G = triumph({ x: -110, z: 1, ry: Math.PI / 2, W: 24, D: 3.2, wc: 7, hc: 6.6, sides: [[-7.7, 2.9, 3.8], [7.7, 2.9, 3.8]], ped: .8, colH: 9.9, colR: .4, cols: [-11.15, -4.4, 4.4, 11.15], attic: [16, 2.9] });
   for (const [cx, w, hs] of G.ops){ const h = Math.min(hs + w * .3, 4.2), L = w - .1, g = new THREE.BoxGeometry(.05, h, L), uv = g.attributes.uv;
     for (let i = 0; i < uv.count; i++) uv.setX(i, uv.getX(i) * L / 1.2);
     const m = new THREE.Mesh(g, mFence); m.position.set(-110, h / 2, 1 - cx); scene.add(m);
@@ -1134,7 +1130,7 @@ for (const [x, z, ry, pose] of [[-106, -6.6, 0, 0], [-106, 8.6, Math.PI, 2], [-1
   [-74, -4.6, 0, 2], [-74, 6.6, Math.PI, 0], [-68, -4.6, 0, 3], [-68, 6.6, Math.PI, 1]]) statueOn(x, z, ry, pose);
 
 // bãi cỏ phía bắc quảng trường: khải hoàn môn có tượng trên đỉnh, hai tượng đứng chầu, hàng cột kiểu đền có dầm mắt cáo
-triumph({ x: -82, z: -38, ry: 0, W: 12, D: 2.4, wc: 4.4, hc: 4.6, ped: .6, colH: 7, colR: .3, cols: [-5.3, -3.25, 3.25, 5.3], attic: [7.6, 1.7], text: "VINUNI", statue: 2.1, pose: 0 });
+triumph({ x: -82, z: -38, ry: 0, W: 12, D: 2.4, wc: 4.4, hc: 4.6, ped: .6, colH: 7, colR: .3, cols: [-5.3, -3.25, 3.25, 5.3], attic: [7.6, 1.7], statue: 2.1, pose: 0 });
 statueOn(-89.6, -34.6, 0, 1); statueOn(-74.6, -34.6, 0, 3);
 { const zs = [-40.2, -36.4], c = columnGeo(3.6, .19);
   for (const z of zs) for (let x = -72; x <= -61.9; x += 2.5){ bake.at(c, mArchTrim, x, 0, z); solid(x - .3, z - .3, x + .3, z + .3, 0, 4.4, null); }
@@ -1163,6 +1159,67 @@ statueOn(-89.6, -34.6, 0, 1); statueOn(-74.6, -34.6, 0, 3);
   bake.put(boxAt(1.2, .5, 1.1, cx, Y + Hp + .2, 42.1), mArchTrim); bake.at(statueGeo(2), mMarbleW, cx, Y + Hp + .45, 42.1, 0, 1.35);                      // tượng đỉnh trán hồi
   for (const s of [-1, 1]){ bake.put(boxAt(.9, .4, .9, cx + s * (half - .3), Y + .2, 42.6), mArchTrim); bake.at(urnGeo, mMarbleW, cx + s * (half - .3), Y + .4, 42.6, 0, 1.2); }
 }
+// TÒA G + TÒA E — mặt tây (nhìn ra sân bậc / khu tư vấn), dựng theo ảnh mặt tiền nhà G & E thật (kalis.com.vn/nha-g-e-dai-hoc-vinuni):
+// sảnh cột Corinth khổng lồ xếp đơn – đôi – đôi – đơn, đầu cột và đai thân mạ vàng, cửa giữa là cổng vòm xuyên vào sân trong,
+// hai cửa gỗ cao hai bên, ô cửa tròn phía trên, dầm + trán hồi có phù điêu, khối bên có chóp khiên cuộn và tượng trắng trên bệ.
+// Dựng trong hệ toạ độ riêng (mặt tường x = 0, hướng ra +x, tâm z = 0) rồi đặt vào map bằng ma trận.
+function geFront(FX, FZ, ry){
+  const m4 = new THREE.Matrix4().compose(new V3(FX, 0, FZ), new THREE.Quaternion().setFromAxisAngle(new V3(0, 1, 0), ry), new V3(1, 1, 1));
+  const put = (g, mat) => bake.put(g, mat, m4);
+  const at = (g, mat, x, y, z, r2 = 0, s = 1) => put(g.clone().scale(s, s, s).rotateY(r2).translate(x, y, z), mat);
+  const wp = (x, z) => new V3(x, 0, z).applyMatrix4(m4);
+  const col = (x1, z1, x2, z2, y1, y2, mat) => { const a = wp(x1, z1), b = wp(x2, z2); solid(Math.min(a.x, b.x), Math.min(a.z, b.z), Math.max(a.x, b.x), Math.max(a.z, b.z), y1, y2, null);
+    if (mat) put(boxAt(x2 - x1, y2 - y1, z2 - z1, (x1 + x2) / 2, (y1 + y2) / 2, (z1 + z2) / 2), mat); };
+  const D = 3.4, Wp = 13.4, H = 9.2, R = .42, XF = D, CX = XF - .5, cols = [-6, -3.3, -2.4, 2.4, 3.3, 6];
+  const shaft = columnGeo(H - R * 1.6, R, true);
+  col(0, -Wp / 2 - .4, XF + .6, Wp / 2 + .4, 0, .25, matStone);                                                                  // nền sảnh + bậc
+  put(boxAt(.65, .12, Wp + 1.2, XF + .93, .06, 0), matStone);
+  for (const z of cols){ at(shaft, mArchTrim, CX, .25, z); at(geCap, matTowerGold, CX, .25, z); col(CX - .42, z - .42, CX + .42, z + .42, .25, H + .25);
+    put(boxAt(.2, H, R * 2.2, .1, .25 + H / 2, z), mArchTrim); at(geCap, matTowerGold, .1, .25, z, 0, .9); }                     // trụ áp tường có đầu vàng
+  for (const [zc, w, door] of [[0, 4, false], [-4.6, 1.7, true], [4.6, 1.7, true]]){                                                   // cửa giữa = cổng vòm vào sân trong
+    if (door) put(boxAt(.08, 4.2, w, .04, 2.35, zc), geWood);
+    put(boxAt(.14, .3, w + .5, .07, 4.6, zc), mArchTrim);
+    for (const s of [-1, 1]) put(boxAt(.12, 4.4, .22, .06, 2.45, zc + s * (w / 2 + .11)), mArchTrim);
+    const oc = new THREE.TorusGeometry(.62, .08, 8, 28); oc.rotateY(Math.PI / 2); oc.translate(.08, 6.1, zc); put(oc, matTowerGold);
+    const og = new THREE.CylinderGeometry(.6, .6, .04, 24); og.rotateZ(Math.PI / 2); og.translate(.04, 6.1, zc); put(og, matDark);
+    for (let k = 0; k < 6; k++){ const sp = boxAt(.03, 1.18, .05, 0, 0, 0); sp.rotateX(k * Math.PI / 6); sp.translate(.07, 6.1, zc); put(sp, matTowerGold); } }
+  const Y = .25 + H; let y = Y;                                                                                                   // dầm ba lớp, diềm, răng cưa, gờ mái
+  for (const [h, f] of [[.3, XF - .02], [.3, XF + .03], [.32, XF + .08]]){ put(boxAt(f, h, Wp + .3, f / 2, y + h / 2, 0), mArchTrim); y += h; }
+  put(boxAt(D, .75, Wp + .1, D / 2, y + .375, 0), mArch);
+  for (let z = -Wp / 2 + .6; z <= Wp / 2 - .5; z += 1.2){ const r = new THREE.CylinderGeometry(.13, .13, .05, 14); r.rotateZ(Math.PI / 2); r.translate(XF + .02, y + .375, z); put(r, matTowerGold); }
+  y += .75;
+  for (let z = -Wp / 2 - .1; z <= Wp / 2 + .11; z += .32) put(boxAt(.16, .14, .15, XF + .1, y - .07, z), mArchTrim);
+  put(boxAt(D + .55, .22, Wp + .8, (D + .55) / 2, y + .11, 0), mArchTrim); put(boxAt(D + .75, .2, Wp + 1.05, (D + .75) / 2, y + .32, 0), mArchTrim); y += .42;
+  const Hp = 2.8, half = Wp / 2 + .45;                                                                                            // trán hồi + phù điêu
+  { const t = new THREE.Shape(); t.moveTo(-half, 0); t.lineTo(half, 0); t.lineTo(0, Hp); t.closePath();
+    const g = new THREE.ExtrudeGeometry(t, { depth: D - .2, bevelEnabled: false }); g.rotateY(Math.PI / 2); g.translate(0, y, 0); put(sUV(g, .25), mArch); }
+  const ang = Math.atan2(Hp, half), L = Math.hypot(Hp, half) + .45;
+  for (const sd of [-1, 1]) for (const [h, f, k] of [[.34, XF + .6, .45], [.15, XF + .78, .64]]){ const g = boxAt(f, h, L, f / 2, 0, 0); g.rotateX(sd * ang); g.translate(0, y + Hp / 2 + k * .3, sd * half / 2); put(g, mArchTrim); }
+  { const sg = sunEmblem(.75); sg.rotateY(Math.PI / 2); sg.translate(XF - .18, y + 1.15, 0); put(sg, matTowerGold);
+    for (const sd of [-1, 1]){ const fig = statueGeo(sd > 0 ? 3 : 1).clone(); fig.rotateZ(sd * 1.25); fig.rotateY(Math.PI / 2); fig.scale(.75, .75, .75); fig.translate(XF - .35, y + .3, sd * 2.4); put(fig, mMarbleW);
+      const sw = new THREE.TorusGeometry(.8, .07, 6, 16, Math.PI); sw.rotateZ(Math.PI); sw.rotateY(Math.PI / 2); sw.translate(XF - .2, y + 1.2, sd * 4.6); put(sw, matTowerGold); } }
+  put(boxAt(.9, .45, .9, D / 2, y + Hp + .2, 0), mArchTrim); at(urnGeo, mMarbleW, D / 2, y + Hp + .42, 0, 0, 1.1);
+  put(boxAt(D - .05, .12, Wp, D / 2, Y - .06, 0), geCeil);                                                                       // trần sảnh ô cờ
+  for (let z = -Wp / 2 + 1; z < Wp / 2; z += 1.3) for (const x of [1.1, 2.3]) put(boxAt(.95, .06, .95, x, Y - .14, z), mArchTrim);
+  for (const sd of [-1, 1]){ const zc = sd * 7.4;                                                                                 // khối bên: trụ góc, chóp khiên cuộn, tượng
+    put(boxAt(.35, 12.6, 1.5, .17, 6.55, zc), mArchTrim);
+    const shield = new THREE.SphereGeometry(.9, 20, 14); shield.scale(.35, 1.25, .95); shield.translate(.2, 17.3, zc); put(shield, mArchTrim);
+    const rim = new THREE.TorusGeometry(.95, .14, 8, 28); rim.scale(1, 1.3, 1); rim.rotateY(Math.PI / 2); rim.translate(.45, 17.3, zc); put(rim, mArchTrim);
+    for (const s2 of [-1, 1]){ const sc = new THREE.TorusGeometry(.4, .14, 8, 18, Math.PI * 1.4); sc.rotateY(Math.PI / 2); sc.translate(.35, 16.4, zc + s2 * 1.05); put(sc, mArchTrim); }
+    put(boxAt(1.4, .5, 3, .4, 16.05, zc), mArchTrim);
+    const p = wp(1.35, zc); statueOn(p.x, p.z, Math.PI / 2 + ry, sd > 0 ? 2 : 0, 1.05); }
+}
+const geCap = (() => { const R = .42, H = 9.2, P = [], y0 = H - R * 1.6;                                                          // đầu cột Corinth vàng: chuông có lá + đai thân
+  const bell = lathe([[R * .87, y0], [R * .95, y0 + R * .2], [R * 1.08, y0 + R * .7], [R * 1.3, y0 + R * 1.25], [R * 1.42, y0 + R * 1.45], [.001, y0 + R * 1.45]], 32), bp = bell.attributes.position;
+  for (let i = 0; i < bp.count; i++){ const x = bp.getX(i), y = bp.getY(i), z = bp.getZ(i), t = (y - y0) / (R * 1.45), th = Math.atan2(z, x);
+    const leaf = 1 + .09 * Math.max(0, Math.cos(th * 8 + (t > .5 ? Math.PI / 8 : 0))) * Math.sin(Math.PI * ((t * 2) % 1)); bp.setXYZ(i, x * leaf, y, z * leaf); }
+  bell.computeVertexNormals(); P.push(bell, boxAt(R * 3, R * .26, R * 3, 0, H - R * .02, 0));
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]){ const v = new THREE.TorusGeometry(R * .2, R * .07, 6, 12); v.rotateY(Math.PI / 4 * sx * sz); v.translate(sx * R * 1.2, H - R * .4, sz * R * 1.2); P.push(v); }
+  for (const yy of [H * .3, H * .34]){ const ring = new THREE.TorusGeometry(R * .97, R * .08, 6, 28); ring.rotateX(Math.PI / 2); ring.translate(0, yy, 0); P.push(ring); }
+  return mergeParts(P); })();
+const geWood = withEnv(M({ map: texWood, color: 0xb07a4c, roughness: .45 }), .5), geCeil = M({ color: 0xece6da, roughness: .8 });
+geFront(-14, -25, Math.PI);      // Tòa G
+geFront(-14, 25, Math.PI);       // Tòa E
 bake.flush();
 }
 
@@ -1235,7 +1292,7 @@ plantTufts();
 }
 { const R1 = 98969, A1 = 43913; if (RNGN > R1 || ARTN > A1) console.warn("map mới tiêu quá chuỗi ngẫu nhiên cũ", RNGN, ARTN); while (RNGN < R1) rng(); while (ARTN < A1) art(); }
 window.__M1 = [RNGN, ARTN];
-const ZONES = [["Sảnh Tòa I – A", -10, -2, 27, 4], ["Thư viện (Tòa C)", 31, -6, 50, 10], ["Hội trường (Tòa B)", 31, 14, 51, 44], ["Quán cà phê (Tòa F)", -28, 41, -9, 55], ["Nhà thi đấu (Tòa K)", 80, 66, 102, 90],
+const ZONES = [["Sảnh Tòa I – A", -10, -2, 27, 4], ["Tòa C", 31, -6, 50, 10], ["Tòa B", 31, 14, 51, 44], ["Quán cà phê (Tòa F)", -28, 41, -9, 55], ["Nhà thi đấu (Tòa K)", 80, 66, 102, 90],
   ["Sân trong Tòa G", -14, -36, 8, -14], ["Sân trong Tòa E", -14, 14, 8, 36], ["Tòa A", 12, -15, 27, 17], ["Tòa H", 35, -35, 51, -11], ["Mái sảnh đón", -19, -5, -10, 7],
   ["Khán đài ngoài trời", 31, 44, 51, 63.5], ["Vườn hồng", 12, 42, 28, 58], ["Sân vận động", 61, 11, 112, 42], ["Khán đài (Tòa L)", 70, 42, 102, 57], ["Ký túc xá (Tòa J)", 66, 100, 112, 136],
   ["Bãi gửi xe", 7, -58, 42, -40], ["Sân bậc trước nhà", -61, -22, -19, 25], ["Quảng trường", -100, -12, -61, 14], ["Cổng Đại Lễ", -112, -12, -100, 14], ["Cổng San Hô", 100, -5, 112, 11], ["Lối đi sinh viên", 61, -5, 112, 11], ["Công trường đang xây", 62, -58, 112, -5],
@@ -1410,7 +1467,7 @@ preloadPath("radio/ct_fireinhole.wav");
 preloadPath("ambience/opera.wav");
 let radioN = 0, operaGain = null, operaSrc = null;
 function playRadio(){ radioN++; playPathSoon("radio/ct_fireinhole.wav", .9); }
-// Tòa G (nhà con tin): hát opera — to khi sát tường, nhỏ dần khi ra xa
+// Tòa G (nơi giữ con tin): hát opera — to khi sát tường, nhỏ dần khi ra xa
 function updateOpera(){
   if (!actx) return;
   const e = preloadPath("ambience/opera.wav"); if (!e.buf) return;
