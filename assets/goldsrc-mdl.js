@@ -1,6 +1,7 @@
 // Đọc model GoldSrc (.mdl phiên bản 10: Half-Life / Counter-Strike 1.6) thành SkinnedMesh của three.js.
 // Hỗ trợ: xương, mọi sequence trong nhóm 0 (giải nén RLE), texture 8-bit + bảng màu (cờ masked),
-// attachment và sự kiện 5004 (tiếng gắn trong hoạt cảnh). Không hỗ trợ bone controller, blend thứ hai, nhóm sequence ngoài.
+// attachment và sự kiện 5004 (tiếng gắn trong hoạt cảnh), nhiều blend (seq.blend(k), seq.blendRange — vd. góc ngắm của model người chơi).
+// Hoạt cảnh chỉ giải nén khi dùng tới (model người chơi CS có >100 sequence). Không hỗ trợ bone controller, nhóm sequence ngoài.
 import * as THREE from "three";
 
 const FLAG_MASKED = 0x40;
@@ -38,21 +39,24 @@ export function parseMDL(buf, texBuf){
 
   const seqs = [];
   for (let s = 0, n = i32(164), base = i32(168); s < n; s++){
-    const o = base + s * 176, nf = Math.max(1, i32(o + 56)), animindex = i32(o + 124), group = i32(o + 156);
+    const o = base + s * 176, nf = Math.max(1, i32(o + 56)), animindex = i32(o + 124), group = i32(o + 156), nbl = Math.max(1, i32(o + 120));
     const events = [];
     for (let e = 0, ne = i32(o + 48), eb = i32(o + 52); e < ne; e++){ const eo = eb + e * 76; events.push({ frame: i32(eo), event: i32(eo + 4), options: str(eo + 12, 64) }); }
-    const seq = { name: str(o, 32), fps: f32(o + 32) || 30, loop: !!(i32(o + 36) & 1), frames: nf, events, pose: null };
+    const seq = { name: str(o, 32), fps: f32(o + 32) || 30, loop: !!(i32(o + 36) & 1), frames: nf, events, ok: group === 0, nblends: nbl, blendRange: [f32(o + 136), f32(o + 144)], pose: null };
     if (group === 0){
-      const pose = new Float32Array(nf * nb * 7), v = [0, 0, 0, 0, 0, 0];
+      const cache = [];
+      const decode = k => { const pose = new Float32Array(nf * nb * 7), v = [0, 0, 0, 0, 0, 0];
       for (let b = 0; b < nb; b++){
-        const ab = animindex + b * 12, bn = bones[b], offs = [0, 1, 2, 3, 4, 5].map(k => u16(ab + k * 2));
+        const ab = animindex + (k * nb + b) * 12, bn = bones[b], offs = [0, 1, 2, 3, 4, 5].map(k => u16(ab + k * 2));
         for (let f = 0; f < nf; f++){
           for (let k = 0; k < 6; k++) v[k] = bn.value[k] + (offs[k] ? animValue(ab + offs[k], f) * bn.scale[k] : 0);
           const p = (f * nb + b) * 7; angleQuat(v[3], v[4], v[5], q);
           pose[p] = v[0]; pose[p + 1] = v[1]; pose[p + 2] = v[2]; pose[p + 3] = q.x; pose[p + 4] = q.y; pose[p + 5] = q.z; pose[p + 6] = q.w;
         }
       }
-      seq.pose = pose;
+      return pose; };
+      seq.blend = k => cache[k] || (cache[k] = decode(Math.min(k, nbl - 1)));
+      Object.defineProperty(seq, "pose", { get: () => seq.blend((nbl - 1) >> 1), enumerable: true });   // blend giữa (view-model chỉ có 1 blend)
     }
     seqs.push(seq);
   }
@@ -144,10 +148,10 @@ export class MDLModel {
     this.attach = data.attachments.map(a => { const o = new THREE.Object3D(); o.position.set(...a.org); (this.bones[a.bone] || this.mesh).add(o); return o; });
 
     this.cur = null; this.t = 0; this.rate = 1; this.queue = []; this.onEvent = null; this.onEnd = null;
-    const first = data.seqs.findIndex(s => s.pose); if (first >= 0){ this.play(first, { loop: true }); this.update(0); }
+    const first = data.seqs.findIndex(s => s.ok); if (first >= 0){ this.play(first, { loop: true }); this.update(0); }
   }
   find(...names){
-    for (const n of names){ const re = n instanceof RegExp ? n : new RegExp(`^${n}$`, "i"); const i = this.data.seqs.findIndex(s => s.pose && re.test(s.name)); if (i >= 0) return i; }
+    for (const n of names){ const re = n instanceof RegExp ? n : new RegExp(`^${n}$`, "i"); const i = this.data.seqs.findIndex(s => s.ok && re.test(s.name)); if (i >= 0) return i; }
     return -1;
   }
   length(i){ const s = this.data.seqs[i]; return s ? Math.max(1, s.frames - 1) / s.fps : 0; }

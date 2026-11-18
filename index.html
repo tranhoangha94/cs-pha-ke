@@ -210,13 +210,13 @@ if (!location.search.includes("nopcss")){
     float PCSS( sampler2D map, vec4 c ){
       vec2 uv = c.xy; float zr = c.z; pcssInit( uv );
       float sum = 0.0, n = 0.0;
-      for ( int i = 0; i < PCSS_N; i ++ ){ float d = unpackRGBAToDepth( textureLod( map, uv + pcssDisk[ i ] * .007, 0.0 ) ); if ( d < zr - .0012 ){ sum += d; n += 1.0; } }   // .0012 = ~0.4 m: no self-shadowing on leaves / walls
+      for ( int i = 0; i < PCSS_N; i ++ ){ float d = unpackRGBAToDepth( textureLod( map, uv + pcssDisk[ i ] * .007, 0.0 ) ); if ( d < zr - .0004 ){ sum += d; n += 1.0; } }   // .0004 = ~0.14 m: little self-shadowing, contact shadows stay attached
       if ( n < .5 ) return 1.0;
       float rad = clamp( ( zr - sum / n ) * .093, .00035, .007 );            // penumbra ~ blocker distance * 0.035 (ASCII only inside GLSL)
       float lit = 0.0;
       for ( int i = 0; i < PCSS_N; i ++ ){
-        lit += step( zr - .0012, unpackRGBAToDepth( textureLod( map, uv + pcssDisk[ i ] * rad, 0.0 ) ) );
-        lit += step( zr - .0012, unpackRGBAToDepth( textureLod( map, uv - pcssDisk[ i ].yx * rad, 0.0 ) ) ); }
+        lit += step( zr - .00025, unpackRGBAToDepth( textureLod( map, uv + pcssDisk[ i ] * rad, 0.0 ) ) );
+        lit += step( zr - .00025, unpackRGBAToDepth( textureLod( map, uv - pcssDisk[ i ].yx * rad, 0.0 ) ) ); }
       return lit / float( 2 * PCSS_N );
     }
   `;
@@ -248,7 +248,7 @@ function followSun(x, z){   // khung bóng ±64 m đi theo người chơi, bư�
   if (sun.target.position.x === sx && sun.target.position.z === sz) return;
   sun.target.position.set(sx, 0, sz); sun.position.set(sx + SUN_OFF.x, SUN_OFF.y, sz + SUN_OFF.z); sun.target.updateMatrixWorld();
 }
-sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.04;
+sun.shadow.bias = -0.00025; sun.shadow.normalBias = 0.03;   // bias nhỏ: bóng dính sát chân người / vật
 scene.add(sun, sun.target);
 const worldFlash = new THREE.PointLight(0xffb060, 0, 14, 1.6); scene.add(worldFlash);
 
@@ -1158,91 +1158,185 @@ function statueGeo(pose){ if (typeof pose === "string") return godGeo(pose); if 
     const sc = new THREE.CylinderGeometry(.035, .035, .34, 10); sc.rotateZ(Math.PI / 2); sc.translate(-.06, 1.27, .29); P.push(sc); }
   const g = mergeParts(P); STG.set(pose, g); return g; }
 
-// các vị thần Hy Lạp (đá cẩm thạch trắng, cao ~1,8 m, mặt hướng +z): mỗi vị một tư thế và vật biểu tượng riêng
-// zeus: râu, giơ tia sét, quyền trượng · hera: vương miện, quyền trượng, quả lựu · athena: mũ trụ có mào, giáo, khiên tròn
-// ares: áo ngắn, mũ trụ, giơ kiếm, khiên trên tay · apollo: vòng nguyệt quế, đàn lia · artemis: áo ngắn, cung, ống tên sau lưng
-// poseidon: râu, đinh ba · hermes: mũ có cánh, gậy rắn quấn, cánh ở cổ chân · aphrodite: búi tóc, cầm quả táo
-// dionysus: vòng lá, gậy thyrsus đầu quả thông, chén rượu · nike: đôi cánh lớn, giơ vòng nguyệt quế
-const GODS = { zeus: "ZEUS", hera: "HERA", athena: "ATHENA", ares: "ARES", apollo: "APOLLO", artemis: "ARTEMIS", poseidon: "POSEIDON", hermes: "HERMES", aphrodite: "APHRODITE", dionysus: "DIONYSUS", nike: "NIKE" };
+// ---------- TƯỢNG THẦN dựng bằng trường khoảng cách (SDF): cơ, khớp, mặt, tóc, nếp áo hoà mềm vào nhau như đá tạc,
+// rồi lưới hoá bằng surface nets (thuật toán của M. Lysenko, MIT). Tư thế theo các tượng nổi tiếng: Apollo Belvedere,
+// Athena Velletri, Artemis Versailles, Ares Borghese, Hermes Praxiteles, Zeus / Poseidon cầm quyền trượng, Hera Barberini,
+// Aphrodite Milo, Dionysos, Nike Samothrace. Mặt tượng hướng +z, tay phải của tượng ở phía -x. Vật cầm tay dựng bằng khối thường.
+const SNT = (() => { const ce = new Int32Array(24); let k = 0; for (let i = 0; i < 8; i++) for (let j = 1; j <= 4; j <<= 1){ const p = i ^ j; if (i <= p){ ce[k++] = i; ce[k++] = p; } }
+  const et = new Int32Array(256); for (let i = 0; i < 256; i++){ let em = 0; for (let j = 0; j < 24; j += 2){ const a = !!(i & (1 << ce[j])), b = !!(i & (1 << ce[j + 1])); em |= a !== b ? (1 << (j >> 1)) : 0; } et[i] = em; }
+  return { ce, et }; })();
+function surfaceNets(data, dims){
+  const { ce, et } = SNT, verts = [], faces = [], x = [0, 0, 0], R = [1, dims[0] + 1, (dims[0] + 1) * (dims[1] + 1)], grid = new Float32Array(8), buffer = new Int32Array(R[2] * 2);
+  let n = 0, bufNo = 1;
+  for (x[2] = 0; x[2] < dims[2] - 1; ++x[2], n += dims[0], bufNo ^= 1, R[2] = -R[2]){
+    let m = 1 + (dims[0] + 1) * (1 + bufNo * (dims[1] + 1));
+    for (x[1] = 0; x[1] < dims[1] - 1; ++x[1], ++n, m += 2) for (x[0] = 0; x[0] < dims[0] - 1; ++x[0], ++n, ++m){
+      let mask = 0, g = 0, idx = n;
+      for (let k = 0; k < 2; ++k, idx += dims[0] * (dims[1] - 2)) for (let j = 0; j < 2; ++j, idx += dims[0] - 2) for (let i = 0; i < 2; ++i, ++g, ++idx){ const p = data[idx]; grid[g] = p; mask |= p < 0 ? 1 << g : 0; }
+      if (mask === 0 || mask === 0xff) continue;
+      const em = et[mask], v = [0, 0, 0]; let ec = 0;
+      for (let i = 0; i < 12; ++i){ if (!(em & (1 << i))) continue; ++ec; const e0 = ce[i << 1], e1 = ce[(i << 1) + 1], g0 = grid[e0], g1 = grid[e1]; let t = g0 - g1; if (Math.abs(t) > 1e-9) t = g0 / t; else continue;
+        for (let j = 0, k = 1; j < 3; ++j, k <<= 1){ const a = e0 & k, b = e1 & k; if (a !== b) v[j] += a ? 1 - t : t; else v[j] += a ? 1 : 0; } }
+      const s = 1 / ec; for (let i = 0; i < 3; ++i) v[i] = x[i] + s * v[i];
+      buffer[m] = verts.length; verts.push(v);
+      for (let i = 0; i < 3; ++i){ if (!(em & (1 << i))) continue; const iu = (i + 1) % 3, iv = (i + 2) % 3; if (x[iu] === 0 || x[iv] === 0) continue;
+        const du = R[iu], dv = R[iv];
+        if (mask & 1) faces.push([buffer[m], buffer[m - du], buffer[m - du - dv], buffer[m - dv]]); else faces.push([buffer[m], buffer[m - dv], buffer[m - du - dv], buffer[m - du]]); } }
+  }
+  return { verts, faces };
+}
+// đối tượng SDF: nón bo tròn (rc) và elip (el, có thể xoay), mỗi khối hoà vào phần trước với độ mềm k, hoặc khoét đi (sub)
+function sdfMesh(prims, step = .021){
+  const BIG = .25, smin = (a, b, k) => { const h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - h * h * k * .25; };
+  for (const p of prims){ const m = p.k + step * 3;
+    if (p.t === 0){ const r = Math.max(p.r1, p.r2) + m; p.lo = [0, 1, 2].map(i => Math.min(p.a[i], p.b[i]) - r); p.hi = [0, 1, 2].map(i => Math.max(p.a[i], p.b[i]) + r);
+      const ba = [p.b[0] - p.a[0], p.b[1] - p.a[1], p.b[2] - p.a[2]]; p.ba = ba; p.l2 = ba[0] * ba[0] + ba[1] * ba[1] + ba[2] * ba[2]; p.rr = p.r1 - p.r2; p.a2 = p.l2 - p.rr * p.rr; p.il2 = 1 / p.l2; }
+    else { const r = Math.max(...p.r) + m; p.lo = p.c.map(v => v - r); p.hi = p.c.map(v => v + r);
+      if (p.rot){ const q = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(...p.rot)).invert().elements; p.mi = [q[0], q[4], q[8], q[1], q[5], q[9], q[2], q[6], q[10]]; } } }
+  const one = (p, x, y, z) => {
+    if (p.t === 0){ const px = x - p.a[0], py = y - p.a[1], pz = z - p.a[2], ba = p.ba, yy = px * ba[0] + py * ba[1] + pz * ba[2], zz = yy - p.l2;
+      const qx = px * p.l2 - ba[0] * yy, qy = py * p.l2 - ba[1] * yy, qz = pz * p.l2 - ba[2] * yy, x2 = qx * qx + qy * qy + qz * qz, y2 = yy * yy * p.l2, z2 = zz * zz * p.l2, kk = Math.sign(p.rr) * p.rr * p.rr * x2;
+      if (Math.sign(zz) * p.a2 * z2 > kk) return Math.sqrt(x2 + z2) * p.il2 - p.r2;
+      if (Math.sign(yy) * p.a2 * y2 < kk) return Math.sqrt(x2 + y2) * p.il2 - p.r1;
+      return (Math.sqrt(x2 * p.a2 * p.il2) + yy * p.rr) * p.il2 - p.r1; }
+    let px = x - p.c[0], py = y - p.c[1], pz = z - p.c[2];
+    if (p.mi){ const a = p.mi; const nx = a[0] * px + a[1] * py + a[2] * pz, ny = a[3] * px + a[4] * py + a[5] * pz, nz = a[6] * px + a[7] * py + a[8] * pz; px = nx; py = ny; pz = nz; }
+    const r = p.r, k0 = Math.hypot(px / r[0], py / r[1], pz / r[2]), k1 = Math.hypot(px / (r[0] * r[0]), py / (r[1] * r[1]), pz / (r[2] * r[2]));
+    return k1 > 1e-9 ? k0 * (k0 - 1) / k1 : -Math.min(...r); };
+  const field = (x, y, z, list) => { let d = BIG;
+    for (const p of list){ if (x < p.lo[0] || x > p.hi[0] || y < p.lo[1] || y > p.hi[1] || z < p.lo[2] || z > p.hi[2]) continue;
+      let e = one(p, x, y, z); if (p.disp) e += p.disp(x, y, z);
+      d = p.sub ? -smin(-d, e, p.k) : smin(d, e, p.k); }
+    return d; };
+  const lo = [0, 1, 2].map(i => Math.min(...prims.filter(p => !p.sub).map(p => p.lo[i]))), hi = [0, 1, 2].map(i => Math.max(...prims.filter(p => !p.sub).map(p => p.hi[i])));
+  const dims = [0, 1, 2].map(i => Math.ceil((hi[i] - lo[i]) / step) + 2), data = new Float32Array(dims[0] * dims[1] * dims[2]);
+  for (let k = 0; k < dims[2]; k++){ const z = lo[2] + k * step, zl = prims.filter(p => z >= p.lo[2] && z <= p.hi[2]);
+    for (let j = 0; j < dims[1]; j++){ const y = lo[1] + j * step, yl = zl.filter(p => y >= p.lo[1] && y <= p.hi[1]);
+      for (let i = 0; i < dims[0]; i++) data[i + dims[0] * (j + dims[1] * k)] = yl.length ? field(lo[0] + i * step, y, z, yl) : BIG; } }
+  const { verts, faces } = surfaceNets(data, dims), pos = new Float32Array(verts.length * 3), nor = new Float32Array(verts.length * 3), h = .006;
+  verts.forEach((v, i) => { const x = lo[0] + v[0] * step, y = lo[1] + v[1] * step, z = lo[2] + v[2] * step; pos.set([x, y, z], i * 3);
+    const gx = field(x + h, y, z, prims) - field(x - h, y, z, prims), gy = field(x, y + h, z, prims) - field(x, y - h, z, prims), gz = field(x, y, z + h, prims) - field(x, y, z - h, prims), l = Math.hypot(gx, gy, gz) || 1;
+    nor.set([gx / l, gy / l, gz / l], i * 3); });
+  const idx = []; for (const f of faces){ idx.push(f[0], f[1], f[2], f[0], f[2], f[3]); }
+  if (idx.length){ const a = idx[0] * 3, b = idx[1] * 3, c = idx[2] * 3;                      // hướng mặt tam giác phải cùng chiều pháp tuyến
+    const ux = pos[b] - pos[a], uy = pos[b + 1] - pos[a + 1], uz = pos[b + 2] - pos[a + 2], vx = pos[c] - pos[a], vy = pos[c + 1] - pos[a + 1], vz = pos[c + 2] - pos[a + 2];
+    const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
+    if (cx * nor[a] + cy * nor[a + 1] + cz * nor[a + 2] < 0) for (let i = 0; i < idx.length; i += 3){ const t = idx[i + 1]; idx[i + 1] = idx[i + 2]; idx[i + 2] = t; } }
+  const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(pos, 3)); g.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+  g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(verts.length * 2), 2)); g.setIndex(idx); return g;
+}
+const GOD_LIST = ["zeus", "hera", "athena", "ares", "apollo", "artemis", "poseidon", "hermes", "aphrodite", "dionysus", "nike"];
 function godGeo(god){ if (STG.has(god)) return STG.get(god);
-  const P = [], v = (x, y, z) => new V3(x, y, z), up = new V3(0, 1, 0);
-  const short = god === "ares" || god === "artemis" || god === "hermes", beard = god === "zeus" || god === "poseidon";
-  const sph = (r, x, y, z, sx = 1, sy = 1, sz = 1) => { const g = new THREE.SphereGeometry(r, 16, 12); g.scale(sx, sy, sz); g.translate(x, y, z); P.push(g); };
-  const cyl = (r0, r1, a, b, seg = 10) => { const d = b.clone().sub(a), L = d.length(), g = new THREE.CylinderGeometry(r1, r0, L, seg); g.translate(0, L / 2, 0);
-    g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(up, d.normalize())); g.translate(a.x, a.y, a.z); P.push(g); };
-  const limb = (a, b, r0, r1) => { cyl(r0, r1, a, b); sph(r1 * 1.08, b.x, b.y, b.z); };
-  const arm = (sh, el, ha) => { limb(sh, el, .058, .048); limb(el, ha, .046, .036); };
-  const rb = (w, h, d, x, y, z, rz) => { const b = boxAt(w, h, d, 0, 0, 0); b.rotateZ(rz); b.translate(x, y, z); P.push(b); };   // xoay quanh tâm khối rồi mới đặt chỗ
-  const tor = (r, t, x, y, z, rx = 0, ry = 0, rz = 0, arc = Math.PI * 2) => { const g = new THREE.TorusGeometry(r, t, 6, 20, arc); g.rotateX(rx); g.rotateY(ry); g.rotateZ(rz); g.translate(x, y, z); P.push(g); };
-  const base = new THREE.CylinderGeometry(.34, .36, .08, 20); base.translate(0, .04, 0); P.push(base);
-  // áo choàng dài (hoặc áo ngắn tới gối + hai chân)
-  const hem = short ? .62 : .08, prof = short ? [[.001, hem], [.24, hem], [.25, hem + .05], [.22, .8], [.19, 1.0], [.2, 1.18], [.215, 1.3], [.2, 1.4], [.12, 1.47], [.05, 1.5]]
-    : [[.001, .08], [.27, .08], [.29, .12], [.25, .45], [.21, .8], [.185, 1.0], [.2, 1.18], [.215, 1.3], [.2, 1.4], [.12, 1.47], [.05, 1.5]];
-  const robe = lathe(prof, 40), rp = robe.attributes.position;
-  for (let i = 0; i < rp.count; i++){ const x = rp.getX(i), y = rp.getY(i), z = rp.getZ(i), th = Math.atan2(z, x), rr = Math.hypot(x, z);
-    const fold = y < 1.05 ? .024 * Math.sin(th * 9 + y * 2.2 + god.length) * (1.1 - y) : .006 * Math.sin(th * 14 + y * 9);
-    const k = rr > .01 ? (rr + fold) / rr : 1; let nx = x * k, nz = z * k; nz *= 1 - .3 * smooth(.85, 1.2, y); nx += .035 * Math.sin(y * 2.4 + .4); rp.setXYZ(i, nx, y, nz); }
-  robe.computeVertexNormals(); P.push(robe);
-  if (short) for (const sx of [-1, 1]){ limb(v(sx * .1, .1, sx > 0 ? .04 : -.02), v(sx * .09, .4, .02), .045, .055); limb(v(sx * .09, .4, .02), v(sx * .1, hem + .05, 0), .055, .07);
-    P.push(boxAt(.09, .05, .2, sx * .1, .105, .07)); }                                                                          // hai chân + bàn chân
-  sph(1, .02, 1.43, 0, .25, .09, .14);                                                                                         // vai
-  cyl(.058, .048, v(.03, 1.47, 0), v(.03, 1.59, 0));                                                                          // cổ
-  sph(.105, .03, 1.65, .005, 1, 1.15, 1.05);                                                                                   // đầu
-  P.push(boxAt(.022, .045, .03, .03, 1.645, .11));                                                                            // sống mũi
-  const helmet = god === "athena" || god === "ares";
-  if (helmet){ sph(.125, .03, 1.69, -.01, 1, 1.05, 1.1); P.push(boxAt(.035, .14, .3, .03, 1.83, -.03)); tor(.11, .018, .03, 1.62, .03, Math.PI / 2); }   // mũ trụ + mào + vành
-  else { sph(.112, .03, 1.68, -.018, 1.02, .98, 1.02); if (god !== "zeus" && god !== "poseidon") sph(.055, .03, 1.65, -.11); }   // tóc (+ búi)
-  if (beard){ sph(.075, .03, 1.57, .07, 1, 1.35, .75); }
-  if (god === "apollo" || god === "dionysus") tor(.108, .018, .03, 1.72, -.01, Math.PI / 2 - .2);                            // vòng lá trên đầu
-  if (god === "hera") tor(.1, .016, .03, 1.76, -.01, Math.PI / 2 - .3);                                                       // vương miện
-  if (god === "hermes"){ const hat = new THREE.CylinderGeometry(.17, .17, .025, 18); hat.translate(.03, 1.74, 0); P.push(hat); sph(.1, .03, 1.75, -.01, 1, .6, 1);
-    for (const s of [-1, 1]) rb(.02, .08, .16, .03 + s * .15, 1.78, -.04, s * -.5); }
-  const SL = v(-.2, 1.42, 0), SR = v(.24, 1.42, 0);
-  if (god === "zeus" || god === "hera"){ const h = god === "zeus" ? v(.34, 1.92, .08) : v(.12, 1.26, .27);
-    arm(SR, god === "zeus" ? v(.32, 1.66, .05) : v(.27, 1.16, .1), h); arm(SL, v(-.3, 1.2, .08), v(-.31, 1.02, .18));
-    cyl(.022, .02, v(-.31, .1, .18), v(-.31, 2.0, .18)); sph(.045, -.31, 2.02, .18);                                         // quyền trượng
-    if (god === "zeus") [[0, .06, .3], [.03, .16, -.4], [-.01, .26, .35], [.02, .36, -.3]].forEach(([dx, dy, rz]) => rb(.04, .14, .03, h.x + dx, h.y + dy, h.z, rz));   // tia sét gấp khúc
-    else sph(.05, h.x, h.y + .04, h.z + .04); }                                                                              // quả lựu
-  else if (god === "poseidon"){ arm(SR, v(.3, 1.2, .1), v(.32, 1.3, .22)); arm(SL, v(-.27, 1.15, .05), v(-.22, .93, .13));
-    cyl(.022, .02, v(.32, .1, .22), v(.32, 2.15, .22)); P.push(boxAt(.26, .03, .03, .32, 2.15, .22));
-    for (const dx of [-.12, 0, .12]){ const c = new THREE.ConeGeometry(.02, .22, 6); c.translate(.32 + dx, 2.27, .22); P.push(c); } }   // đinh ba
-  else if (god === "athena"){ arm(SR, v(.3, 1.3, .05), v(.34, 1.55, .1)); arm(SL, v(-.3, 1.15, .05), v(-.38, .98, .12));
-    cyl(.02, .018, v(.34, .1, .1), v(.34, 2.35, .1)); { const c = new THREE.ConeGeometry(.035, .2, 6); c.translate(.34, 2.45, .1); P.push(c); }   // giáo
-    { const s = new THREE.CylinderGeometry(.36, .36, .05, 24); s.rotateX(Math.PI / 2); s.rotateY(-.5); s.translate(-.5, .42, .12); P.push(s); sph(.06, -.48, .42, .15); } }   // khiên dựng bên chân
-  else if (god === "ares"){ const h = v(.38, 1.86, .12); arm(SR, v(.32, 1.62, .06), h); arm(SL, v(-.3, 1.2, .15), v(-.2, 1.25, .32));
-    P.push(boxAt(.05, .62, .016, h.x, h.y + .36, h.z), boxAt(.18, .03, .04, h.x, h.y + .05, h.z));                            // kiếm
-    { const s = new THREE.CylinderGeometry(.32, .32, .05, 24); s.rotateX(Math.PI / 2); s.translate(-.24, 1.22, .38); P.push(s); sph(.06, -.24, 1.22, .41); } }
-  else if (god === "apollo"){ arm(SR, v(.3, 1.15, .05), v(.33, .93, .1)); arm(SL, v(-.28, 1.15, .12), v(-.2, 1.2, .3));
-    const lx = -.2, lz = .33; tor(.11, .018, lx - .08, 1.38, lz, 0, 0, Math.PI * .5, Math.PI * .7); tor(.11, .018, lx + .08, 1.38, lz, 0, 0, Math.PI * -.2, Math.PI * .7);   // hai sừng đàn lia
-    P.push(boxAt(.26, .025, .025, lx, 1.5, lz), boxAt(.2, .09, .05, lx, 1.16, lz));                                           // thanh ngang + hộp cộng hưởng
-    for (let k = -2; k <= 2; k++) P.push(boxAt(.006, .32, .006, lx + k * .03, 1.33, lz)); }                                   // dây đàn
-  else if (god === "artemis"){ const h = v(-.3, 1.42, .5); arm(SL, v(-.28, 1.38, .25), h); arm(SR, v(.3, 1.62, -.05), v(.18, 1.75, -.12));
-    tor(.42, .016, h.x, h.y, h.z - .02, 0, Math.PI / 2, 0, Math.PI * .75);                                                   // cây cung
-    cyl(.004, .004, v(h.x, h.y + .4, h.z - .2), v(h.x, h.y - .4, h.z - .2), 4);                                              // dây cung
-    cyl(.06, .055, v(.05, 1.12, -.18), v(.18, 1.66, -.14), 12); }                                                            // ống tên
-  else if (god === "hermes"){ arm(SR, v(.28, 1.18, 0), v(.3, .95, .08)); arm(SL, v(-.27, 1.2, .12), v(-.3, 1.32, .26));
-    cyl(.016, .016, v(-.3, .7, .26), v(-.3, 1.75, .26)); for (let k = 0; k < 4; k++) tor(.045, .012, -.3, .9 + k * .18, .26, Math.PI / 2, 0, 0);   // gậy rắn quấn
-    for (const s of [-1, 1]){ rb(.1, .03, .02, -.3 + s * .06, 1.77, .26, s * .5); rb(.02, .05, .1, s * .15, .17, -.02, s * -.6); } }                                // cánh trên gậy + cánh cổ chân
-  else if (god === "aphrodite"){ const h = v(.24, 1.45, .22); arm(SR, v(.3, 1.25, .1), h); arm(SL, v(-.24, 1.12, .1), v(-.1, .98, .2)); sph(.05, h.x, h.y + .05, h.z + .02); }
-  else if (god === "dionysus"){ arm(SR, v(.3, 1.25, .08), v(.34, 1.4, .18)); arm(SL, v(-.24, 1.18, .12), v(-.08, 1.28, .26));
-    cyl(.018, .018, v(.34, .1, .18), v(.34, 2.0, .18)); sph(.06, .34, 2.06, .18, 1, 1.5, 1);                                  // gậy thyrsus đầu quả thông
-    { const c = lathe([[.001, 0], [.03, 0], [.012, .04], [.06, .12], [.05, .14]], 12); c.translate(-.08, 1.3, .27); P.push(c); } }   // chén rượu
-  else { const h = v(.36, 1.9, .3); arm(SR, v(.33, 1.62, .15), h); arm(SL, v(-.3, 1.2, .08), v(-.2, 1.02, .16));             // NIKE
-    tor(.11, .028, h.x, h.y + .07, h.z, Math.PI / 2.4);
-    for (const s of [-1, 1]) for (let k = 0; k < 4; k++){ const f = new THREE.SphereGeometry(.5 - k * .07, 12, 8); f.scale(.08, 1, .32); f.rotateZ(s * (.45 + k * .12)); f.translate(s * (.25 + k * .05), 1.65 + k * .04, -.18 - k * .03); P.push(f); } }   // đôi cánh
-  const g = mergeParts(P); STG.set(god, g); return g; }
-// biển tên khắc trên mặt bệ tượng (chữ chìm màu đá xám)
-const plaqueMat = new Map();
-function plaqueFor(god){ if (plaqueMat.has(god)) return plaqueMat.get(god);
-  const c = document.createElement("canvas"); c.width = 512; c.height = 96; const g = c.getContext("2d");
-  g.font = '600 64px "Times New Roman", Georgia, serif'; g.textAlign = "center"; g.textBaseline = "middle"; g.fillStyle = "#6d6a63"; g.fillText(GODS[god].split("").join(" "), 256, 52);
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
-  const m = M({ map: t, alphaTest: .4, roughness: .6 }); plaqueMat.set(god, m); return m; }
+  const female = ["hera", "athena", "artemis", "aphrodite", "nike"].includes(god);
+  const P = [], A = [], add3 = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]], lerp3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  const rc = (a, b, r1, r2, k = .03, disp) => P.push({ t: 0, a, b, r1, r2, k, disp });
+  const el = (c, r, k = .03, rot, disp, sub) => P.push({ t: 1, c, r, k, rot, disp, sub });
+  const folds = (amp, fr, cx = 0, cz = 0) => (x, y, z) => -amp * Math.sin(Math.atan2(z - cz, x - cx) * fr + y * 2.6) * (.6 + .4 * Math.sin(y * 7.3 + x * 5));
+  const curls = (a) => (x, y, z) => -a * (Math.sin(x * 140) * Math.sin(y * 150) * Math.sin(z * 130));
+  // ---- khung xương mặc định (dồn trọng tâm chân phải, hông phải cao hơn, vai phải thấp hơn: dáng contrapposto)
+  const F = female ? .965 : 1, B = .06;                                                            // B = mặt bệ tròn
+  const J = { head: [0, 1.715 * F + B, .01], yaw: 0, tilt: 0, neck: [0, 1.555 * F + B, 0],
+    shR: [female ? -.165 : -.2, 1.455 * F + B, 0], shL: [female ? .165 : .2, 1.48 * F + B, 0],
+    hipR: [female ? -.1 : -.09, .985 * F + B, 0], hipL: [female ? .1 : .09, .955 * F + B, 0],
+    knR: [-.088, .54 + B, .02], anR: [-.085, .09 + B, 0], knL: [.125, .53 + B, .08], anL: [.165, .13 + B, -.07],
+    elR: [-.25, 1.2 * F + B, -.02], wrR: [-.27, .97 * F + B, .03], elL: [.25, 1.2 * F + B, -.02], wrL: [.27, .97 * F + B, .03] };
+  const Y = (v) => [v[0], v[1] * F + B, v[2]];                                                    // toạ độ cánh tay theo chiều cao chuẩn nam
+  const pose = {
+    apollo:   () => { J.elL = Y([.36, 1.4, .14]); J.wrL = Y([.46, 1.38, .32]); J.yaw = .55; },
+    ares:     () => { J.elR = Y([-.31, 1.62, .05]); J.wrR = Y([-.36, 1.84, .1]); J.elL = Y([.3, 1.2, .15]); J.wrL = Y([.2, 1.24, .32]); J.yaw = -.25; },
+    hermes:   () => { J.elL = Y([.28, 1.2, .12]); J.wrL = Y([.31, 1.3, .27]); J.yaw = .3; },
+    dionysus: () => { J.elR = Y([-.3, 1.25, .08]); J.wrR = Y([-.34, 1.4, .18]); J.elL = Y([.24, 1.18, .12]); J.wrL = Y([.08, 1.28, .26]); J.yaw = .2; },
+    zeus:     () => { J.elR = Y([-.32, 1.66, .05]); J.wrR = Y([-.35, 1.9, .08]); J.elL = Y([.3, 1.2, .08]); J.wrL = Y([.31, 1.02, .18]); J.yaw = -.2; },
+    poseidon: () => { J.elR = Y([-.3, 1.22, .1]); J.wrR = Y([-.33, 1.32, .22]); J.yaw = -.35; },
+    hera:     () => { J.elL = Y([.3, 1.22, .08]); J.wrL = Y([.32, 1.42, .18]); J.elR = Y([-.27, 1.16, .1]); J.wrR = Y([-.12, 1.26, .27]); },
+    athena:   () => { J.elR = Y([-.3, 1.62, .04]); J.wrR = Y([-.33, 1.84, .08]); J.elL = Y([.3, 1.15, .05]); J.wrL = Y([.38, .98, .12]); J.yaw = .15; },
+    artemis:  () => { J.elL = Y([.28, 1.38, .25]); J.wrL = Y([.3, 1.42, .5]); J.elR = Y([-.3, 1.62, -.05]); J.wrR = Y([-.18, 1.76, -.12]); J.yaw = .5;
+                      J.knL = [.11, .56 + B, .2]; J.anL = [.13, .14 + B, .32]; J.knR = [-.09, .5 + B, -.05]; J.anR = [-.1, .16 + B, -.2]; },
+    aphrodite:() => { J.elR = Y([-.3, 1.25, .1]); J.wrR = Y([-.24, 1.45, .22]); J.elL = Y([.24, 1.12, .1]); J.wrL = Y([.1, .98, .2]); J.yaw = .35; J.tilt = .1; },
+    nike:     () => { J.elR = Y([-.33, 1.62, .15]); J.wrR = Y([-.36, 1.9, .3]); J.elL = Y([.3, 1.2, .08]); J.wrL = Y([.2, 1.02, .16]);
+                      J.knL = [.1, .56 + B, .18]; J.anL = [.11, .12 + B, .3]; }
+  }; pose[god]();
+  // ---- thân
+  const hipC = lerp3(J.hipR, J.hipL, .5), sh = lerp3(J.shR, J.shL, .5);
+  for (const [hp, kn, an, s] of [[J.hipR, J.knR, J.anR, -1], [J.hipL, J.knL, J.anL, 1]]){
+    rc(hp, kn, female ? .09 : .085, .058, .05); rc(kn, an, .055, .035, .03);
+    el(add3(lerp3(kn, an, .28), [0, 0, -.03]), [.05, .1, .05], .04);                                                   // bắp chân
+    el(add3(kn, [0, .01, .03]), [.035, .03, .03], .02);                                                                 // xương bánh chè
+    rc(add3(an, [0, -.02, -.02]), add3(an, [s * .01, -.05, .15]), .036, .026, .025); }                                  // bàn chân
+  el(add3(hipC, [0, .03, -.01]), female ? [.185, .12, .125] : [.16, .11, .115], .06);                                    // xương chậu
+  for (const s of [-1, 1]) el(add3(hipC, [s * .07, -.01, -.06]), [.075, .085, .07], .04);                               // mông
+  el(lerp3(hipC, sh, .33), female ? [.12, .11, .095] : [.15, .13, .1], .06);                                             // bụng
+  if (!female) el(lerp3(hipC, sh, .52), [.155, .14, .1], .07);                                                         // eo / cơ liên sườn: thân nam thẳng, không thắt eo
+  el(add3(lerp3(hipC, sh, .7), [0, 0, -.005]), female ? [.145, .13, .1] : [.18, .145, .105], .06);                       // lồng ngực
+  for (const s of [-1, 1]) female ? el(add3(lerp3(hipC, sh, .75), [s * .065, -.02, .08]), [.058, .058, .055], .03)
+                                  : el(add3(lerp3(hipC, sh, .82), [s * .08, 0, .055]), [.09, .045, .03], .06);          // cơ ngực nam: rộng, dẹt
+  for (const [s, p] of [[-1, J.shR], [1, J.shL]]){ el(p, [.062, .065, .062], .04); rc(add3(J.neck, [0, -.04, -.01]), p, .055, .045, .04); }
+  rc(add3(J.neck, [0, -.06, 0]), add3(J.neck, [0, .07, .01]), .052, .045, .03);                                        // cổ
+  for (const [shp, elp, wr] of [[J.shR, J.elR, J.wrR], [J.shL, J.elL, J.wrL]]){
+    rc(shp, elp, female ? .042 : .048, female ? .033 : .037, .03); rc(elp, wr, female ? .032 : .036, .025, .02);
+    const d = [wr[0] - elp[0], wr[1] - elp[1], wr[2] - elp[2]], l = Math.hypot(...d); rc(wr, add3(wr, d.map(v => v / l * .085)), .027, .018, .015); }
+  // ---- đầu: hộp sọ, mặt, mũi, cung mày, cằm, môi, hốc mắt, tóc (xoay theo J.yaw)
+  const H = J.head, cy = Math.cos(J.yaw), sy = Math.sin(J.yaw), at = (o) => [H[0] + o[0] * cy + o[2] * sy, H[1] + o[1], H[2] - o[0] * sy + o[2] * cy];
+  el(at([0, .01, -.015]), [.09, .108, .104], .025); el(at([0, -.035, .035]), [.066, .074, .074], .03);
+  rc(at([0, .005, .086]), at([0, -.038, .106]), .011, .015, .01); el(at([0, .026, .074]), [.07, .017, .03], .02); el(at([0, -.088, .058]), [.034, .03, .03], .02);
+  el(at([0, -.06, .088]), [.028, .009, .014], .01);
+  for (const s of [-1, 1]){ el(at([s * .032, .0, .094]), [.017, .009, .014], .01, null, null, true); el(at([s * .088, -.01, .0]), [.012, .025, .02], .01); }   // hốc mắt, tai
+  const helmet = god === "athena" || god === "ares", beard = god === "zeus" || god === "poseidon";
+  if (helmet){ el(at([0, .04, -.02]), [.108, .1, .12], .02); el(at([0, .1, -.04]), [.025, .09, .14], .02, [0, -J.yaw, 0]); el(at([0, -.02, -.1]), [.09, .06, .04], .02); }   // mũ trụ Corinth đẩy lên trán, mào, che gáy
+  else { el(at([0, .035, -.02]), [.1, .094, .112], .02, null, curls(.005));
+    if (female){ el(at([0, .0, -.115]), [.052, .046, .046], .02, null, curls(.004)); rc(at([0, .0, -.1]), at([0, -.16, -.08]), .05, .035, .03, curls(.004)); } }
+  if (beard) el(at([0, -.075, .052]), [.064, .07, .05], .02, null, curls(.006));
+  // ---- áo, áo choàng
+  const longRobe = (top, r1) => rc([0, top, 0], [.02, B + .02, .03], r1, .28, .05, folds(.013, 13));
+  if (god === "hera" || god === "athena" || god === "nike"){ longRobe(J.hipL[1] + .15, .16);
+    rc(add3(hipC, [0, .27, .0]), add3(hipC, [0, .07, .0]), .175, .195, .03, folds(.008, 17));                            // vạt gấp ngang eo (apoptygma)
+    el(add3(hipC, [0, .16, .02]), [.17, .02, .12], .015); }                                                              // dây thắt lưng
+  if (god === "hera") rc(add3(J.shL, [-.02, .02, .06]), add3(J.hipR, [.02, .03, .1]), .06, .07, .03, folds(.006, 30));   // khăn choàng chéo ngực
+  if (god === "athena") el(add3(sh, [0, -.06, .02]), [.2, .075, .13], .03, null, (x, y, z) => -.004 * Math.sin(x * 90) * Math.sin(z * 90));   // khiên ngực aegis
+  if (god === "artemis") rc(add3(hipC, [0, .28, 0]), add3(hipC, [.01, -.36, .04]), .16, .235, .04, folds(.011, 15));     // áo chiton ngắn
+  if (god === "zeus" || god === "dionysus") { rc(add3(hipC, [0, .06, 0]), [.02, B + .03, .03], .19, .27, .05, folds(.014, 12));   // khăn himation quấn hông
+    if (god === "zeus") rc(add3(J.shL, [0, .03, -.02]), add3(J.hipR, [.03, .06, .1]), .055, .07, .03, folds(.006, 28)); }
+  if (god === "aphrodite") rc(add3(hipC, [0, -.04, .0]), [.02, B + .02, .03], .17, .27, .05, folds(.018, 11));           // khăn tuột ngang hông (Milo)
+  if (god === "apollo" || god === "hermes"){                                                                              // áo choàng chlamys vắt vai trái, phủ cẳng tay
+    rc(add3(J.shR, [.02, .02, -.04]), add3(J.shL, [0, .01, -.05]), .045, .055, .03, folds(.004, 30));
+    rc(add3(J.shL, [.02, -.02, -.02]), lerp3(J.elL, J.wrL, .5), .06, .055, .03, folds(.006, 24));
+    rc(lerp3(J.elL, J.wrL, .45), add3(lerp3(J.elL, J.wrL, .45), [.0, -.42, -.03]), .065, .035, .04, folds(.01, 20, J.elL[0], J.elL[2])); }
+  if (god === "nike") for (const s of [-1, 1]) for (let k = 0; k < 3; k++)                                               // đôi cánh xoè sau lưng
+    el(add3(sh, [s * (.2 + k * .07), .2 + k * .12, -.2 - k * .07]), [.05, .42 - k * .06, .2], .06, [-.35, 0, s * (.55 + k * .15)], (x, y) => -.008 * Math.sin(y * 70));
+  const body = sdfMesh(P);
+  // ---- vật cầm tay, mặt bệ tròn
+  const v = (a) => new V3(...a), up = new V3(0, 1, 0);
+  const cyl = (r0, r1, a, b, seg = 10) => { a = v(a); b = v(b); const d = b.clone().sub(a), L = d.length(), g = new THREE.CylinderGeometry(r1, r0, L, seg); g.translate(0, L / 2, 0);
+    g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(up, d.normalize())); g.translate(a.x, a.y, a.z); A.push(g); };
+  const sph = (r, p) => { const g = new THREE.SphereGeometry(r, 12, 9); g.translate(...p); A.push(g); };
+  const rb = (w, h, d, p, rz = 0, ry = 0) => { const b = boxAt(w, h, d, 0, 0, 0); b.rotateZ(rz); b.rotateY(ry); b.translate(...p); A.push(b); };
+  const tor = (r, t, p, rx = 0, ry = 0, rz = 0, arc = Math.PI * 2) => { const g = new THREE.TorusGeometry(r, t, 6, 20, arc); g.rotateX(rx); g.rotateY(ry); g.rotateZ(rz); g.translate(...p); A.push(g); };
+  const hand = (wr, el) => { const d = [wr[0] - el[0], wr[1] - el[1], wr[2] - el[2]], l = Math.hypot(...d); return add3(wr, d.map(q => q / l * .05)); };
+  const hR = hand(J.wrR, J.elR), hL = hand(J.wrL, J.elL);
+  { const g = new THREE.CylinderGeometry(.34, .36, B, 24); g.translate(0, B / 2, 0); A.push(g); }
+  if (god === "apollo"){ tor(.4, .014, add3(hL, [0, 0, .0]), 0, Math.PI / 2 - .5, 0, Math.PI * .8); cyl(.07, .05, [-.2, B, -.13], [-.2, .72, -.12]); }   // cung (gãy) + gốc cây đỡ
+  if (god === "ares"){ rb(.05, .64, .016, add3(hR, [0, .36, 0])); rb(.18, .03, .04, add3(hR, [0, .05, 0]));
+    const s = new THREE.CylinderGeometry(.32, .32, .045, 28); s.rotateX(Math.PI / 2); s.translate(hL[0] + .02, hL[1] - .02, hL[2] + .06); A.push(s); sph(.055, [hL[0] + .02, hL[1] - .02, hL[2] + .09]); }
+  if (god === "hermes"){ cyl(.016, .016, add3(hL, [0, -.6, 0]), add3(hL, [0, .48, 0])); for (let k = 0; k < 4; k++) tor(.04, .011, add3(hL, [0, -.4 + k * .17, 0]), Math.PI / 2);
+    for (const s of [-1, 1]){ rb(.1, .03, .02, add3(hL, [s * .06, .5, 0]), s * .5); rb(.02, .05, .1, add3(J.anL, [s * .05 + .0, .03, -.03]), s * -.6); rb(.02, .05, .1, add3(J.anR, [s * .05, .03, -.03]), s * -.6); }
+    const hat = new THREE.CylinderGeometry(.17, .17, .022, 20); hat.translate(H[0], H[1] + .07, H[2] - .01); A.push(hat); for (const s of [-1, 1]) rb(.02, .08, .15, [H[0] + s * .16, H[1] + .1, H[2] - .03], s * -.5); }
+  if (god === "dionysus"){ cyl(.018, .018, add3(hR, [0, -1.25, 0]), add3(hR, [0, .55, 0])); { const g = new THREE.SphereGeometry(.06, 10, 8); g.scale(1, 1.5, 1); g.translate(hR[0], hR[1] + .6, hR[2]); A.push(g); }
+    { const c = lathe([[.001, 0], [.03, 0], [.012, .04], [.06, .12], [.05, .14]], 12); c.translate(hL[0], hL[1] + .01, hL[2]); A.push(c); } tor(.105, .02, add3(H, [0, .06, -.01]), Math.PI / 2 - .2); }
+  if (god === "zeus"){ [[0, .04, .3], [.03, .14, -.4], [-.01, .24, .35], [.02, .34, -.3]].forEach(([dx, dy, rz]) => rb(.04, .14, .03, add3(hR, [dx, dy, 0]), rz));
+    cyl(.022, .02, [hL[0], B, hL[2]], [hL[0], 2.05, hL[2]]); sph(.045, [hL[0], 2.07, hL[2]]); }
+  if (god === "poseidon"){ cyl(.022, .02, [hR[0], B, hR[2]], [hR[0], 2.2, hR[2]]); rb(.26, .03, .03, [hR[0], 2.2, hR[2]]);
+    for (const dx of [-.12, 0, .12]){ const c = new THREE.ConeGeometry(.02, .22, 6); c.translate(hR[0] + dx, 2.32, hR[2]); A.push(c); } }
+  if (god === "hera"){ cyl(.02, .018, [hL[0], B, hL[2]], [hL[0], 2.0, hL[2]]); sph(.045, [hL[0], 2.02, hL[2]]); sph(.045, hR); tor(.095, .016, add3(H, [0, .07, -.01]), Math.PI / 2 - .3); }
+  if (god === "athena"){ cyl(.02, .018, [hR[0], B, hR[2]], [hR[0], 2.45, hR[2]]); { const c = new THREE.ConeGeometry(.035, .2, 6); c.translate(hR[0], 2.55, hR[2]); A.push(c); }
+    const s = new THREE.CylinderGeometry(.38, .38, .05, 28); s.rotateX(Math.PI / 2); s.rotateY(.6); s.translate(hL[0] + .14, .48, hL[2] + .02); A.push(s); sph(.06, [hL[0] + .12, .48, hL[2] + .06]); }
+  if (god === "artemis"){ tor(.42, .015, add3(hL, [0, 0, -.02]), 0, Math.PI / 2, 0, Math.PI * .75); cyl(.004, .004, add3(hL, [0, .4, -.2]), add3(hL, [0, -.4, -.2]), 4);
+    cyl(.06, .055, [.04, 1.12, -.17], [-.12, 1.66, -.14], 12); for (let k = 0; k < 4; k++) cyl(.008, .008, [-.1 + k * .02, 1.6, -.15], [-.14 + k * .02, 1.78, -.14], 4); }
+  if (god === "aphrodite") sph(.05, add3(hR, [0, .04, .02]));
+  if (god === "nike") tor(.11, .026, add3(hR, [0, .07, 0]), Math.PI / 2.4);
+  const g = mergeParts([body, ...A]); STG.set(god, g); return g; }
 const urnGeo = mergeParts([lathe([[.001, 0], [.22, 0], [.24, .06], [.12, .12], [.1, .2], [.24, .38], [.3, .55], [.26, .72], [.16, .8], [.2, .86], [.001, .9]], 20), (() => { const g = new THREE.SphereGeometry(.08, 10, 8); g.translate(0, .96, 0); return g; })()]);
 const pedG = mergeParts([[1.3, .28, 1.3, .14], [1.12, .12, 1.12, .34], [.9, 1.15, .9, .975], [1.1, .12, 1.1, 1.61], [1.24, .14, 1.24, 1.74]].map(([w, h, d, y]) => boxAt(w, h, d, 0, y, 0)));
-const plaqueG = new THREE.PlaneGeometry(.82, .16); plaqueG.translate(0, 1.32, .456);
-function statueOn(x, z, ry, pose, s = 1.12){ bake.at(pedG, mArchTrim, x, 0, z, ry); bake.at(statueGeo(pose), mMarbleW, x, 1.81, z, ry, s); solid(x - .65, z - .65, x + .65, z + .65, 0, 1.81 + 1.8 * s, null);
-  if (typeof pose === "string") bake.at(plaqueG, plaqueFor(pose), x, 0, z, ry); }
+function statueOn(x, z, ry, pose, s = 1.12){ bake.at(pedG, mArchTrim, x, 0, z, ry); bake.at(statueGeo(pose), mMarbleW, x, 1.81, z, ry, s); solid(x - .65, z - .65, x + .65, z + .65, 0, 1.81 + 1.8 * s, null); }
 
 // khải hoàn môn: thân là một khối đùn có các cửa vòm khoét từ dưới lên, cột Ionic hai mặt, diềm mái, tầng attic, tượng trên đỉnh (tuỳ chọn)
 function triumph(o){
@@ -2486,6 +2580,113 @@ const GSWM = {};      // súng nằm trên đất: w_*.mdl
 if (GSMDL.knife) await Promise.all(Object.entries(GSV).filter(([id]) => id !== "knife").map(async ([id, n]) => {
   try { const r = await fetch(`goldsrc/models/w_${n}.mdl`); if (r.ok) GSWM[id] = parseMDL(await r.arrayBuffer()); } catch (e){ console.warn("w_" + n + ".mdl", e); }
 }));
+// ---------- NHÂN VẬT GỐC COUNTER-STRIKE 1.6 (goldsrc/models/player/*, hostage.mdl, p_*.mdl lấy từ bản CS 1.6 trong Material/)
+// Cảnh sát: GIGN, SAS, GSG-9, SEAL (urban) · Khủng bố: Arctic, Guerilla, Leet, Phoenix (terror). Thân dưới chạy hoạt cảnh đi / chạy
+// (gait), thân trên (từ Bip01 Spine trở lên) chạy ref_aim / ref_shoot theo loại súng, cúi / ngẩng theo blend góc ngắm như trong CS.
+// Súng cầm tay p_*.mdl ghép xương cùng tên với người (bone merge). Thiếu file thì quay về model glTF.
+const CSM = {}, CS_TEAM = [["gign", "sas", "gsg9", "urban"], ["arctic", "guerilla", "leet", "terror"]];
+if (GSMDL.knife) try {
+  const get = async p => { const r = await fetch(p); if (!r.ok) throw new Error(p); return parseMDL(await r.arrayBuffer()); };
+  await Promise.all([...CS_TEAM.flat().map(async n => { CSM[n] = await get(`goldsrc/models/player/${n}/${n}.mdl`); }),
+    (async () => { CSM.hostage = await get("goldsrc/models/hostage.mdl"); })(),
+    ...[...new Set(Object.values(GSV))].map(async n => { try { CSM["p_" + n] = await get(`goldsrc/models/p_${n}.mdl`); } catch {} })]);
+} catch (e){ console.warn("Không nạp được model nhân vật GoldSrc, dùng glTF", e); for (const k in CSM) delete CSM[k]; }
+const CS_OK = !!(CSM.gign && CSM.terror && CSM.hostage);
+// đuôi tên hoạt cảnh thân trên theo súng (như bảng m_szAnimExtention của CS)
+const CS_EXT = { glock: "onehanded", usp: "onehanded", p228: "onehanded", deagle: "onehanded", fiveseven: "onehanded", elite: "dualpistols", mac10: "onehanded", tmp: "onehanded",
+  mp5: "mp5", ump45: "carbine", p90: "carbine", m3: "shotgun", xm1014: "shotgun", galil: "ak47", ak47: "ak47", famas: "carbine", m4a1: "rifle", sg552: "rifle", aug: "carbine",
+  scout: "rifle", awp: "rifle", sg550: "rifle", g3sg1: "rifle", m249: "m249", knife: "knife", he: "grenade", flash: "grenade", smoke: "grenade" };
+const csMatCache = new Map();
+const csMat = (t, tex) => { if (!tex) return M({ color: 0x888888 }); if (!csMatCache.has(tex)) csMatCache.set(tex, M({ map: tex, roughness: .82, alphaTest: t && t.masked ? .5 : 0 })); return csMatCache.get(tex); };
+// thông tin dùng chung theo model: chỉ số xương theo tên, mặt nạ thân trên, chỉ số sequence theo tên, độ cao chân
+function csInfo(data){
+  if (data._cs) return data._cs;
+  const bi = {}; data.bones.forEach((b, i) => { bi[b.name] = i; });
+  const spine = Object.keys(bi).find(n => / Spine$/.test(n));
+  const upper = data.bones.map((b, i) => { for (let p = i; p >= 0; p = data.bones[p].parent) if (data.bones[p].name === spine) return true; return false; });
+  const si = {}; data.seqs.forEach((s, i) => { if (s.ok && !(s.name.toLowerCase() in si)) si[s.name.toLowerCase()] = i; });
+  return data._cs = { bi, upper, si, foot: null };
+}
+const _cq0 = new THREE.Quaternion(), _cq1 = new THREE.Quaternion(), _cq2 = new THREE.Quaternion(), _cq3 = new THREE.Quaternion();
+// đặt tư thế cho các xương (mask: chỉ xương có upper[b] === want; pitch: độ, cho các sequence có nhiều blend)
+function csApply(m, seq, t, mask, want, pitch){
+  const nb = m.bones.length, last = Math.max(1, seq.frames - 1), f = seq.loop ? t % last : Math.min(t, last), f0 = Math.floor(f), a = f - f0, f1 = Math.min(f0 + 1, seq.frames - 1);
+  let A = seq.pose, Bp = null, w = 0;
+  if (seq.nblends > 1 && pitch != null){ const [s0, s1] = seq.blendRange, x = clamp((pitch - s0) / ((s1 - s0) || 1), 0, 1) * (seq.nblends - 1), k0 = Math.min(seq.nblends - 2, Math.floor(x));
+    A = seq.blend(k0); Bp = seq.blend(k0 + 1); w = x - k0; }
+  for (let b = 0; b < nb; b++){ if (mask && mask[b] !== want) continue;
+    const p0 = (f0 * nb + b) * 7, p1 = (f1 * nb + b) * 7, bone = m.bones[b];
+    let x = A[p0] + (A[p1] - A[p0]) * a, y = A[p0 + 1] + (A[p1 + 1] - A[p0 + 1]) * a, z = A[p0 + 2] + (A[p1 + 2] - A[p0 + 2]) * a;
+    _cq0.set(A[p0 + 3], A[p0 + 4], A[p0 + 5], A[p0 + 6]); _cq1.set(A[p1 + 3], A[p1 + 4], A[p1 + 5], A[p1 + 6]); _cq0.slerp(_cq1, a);
+    if (Bp){ _cq2.set(Bp[p0 + 3], Bp[p0 + 4], Bp[p0 + 5], Bp[p0 + 6]); _cq3.set(Bp[p1 + 3], Bp[p1 + 4], Bp[p1 + 5], Bp[p1 + 6]); _cq2.slerp(_cq3, a); _cq0.slerp(_cq2, w);
+      x += ((Bp[p0] + (Bp[p1] - Bp[p0]) * a) - x) * w; y += ((Bp[p0 + 1] + (Bp[p1 + 1] - Bp[p0 + 1]) * a) - y) * w; z += ((Bp[p0 + 2] + (Bp[p1 + 2] - Bp[p0 + 2]) * a) - z) * w; }
+    bone.position.set(x, y, z); bone.quaternion.copy(_cq0); }
+}
+let csPick = [0, 0];
+function makeSoldierCS(team, owner){
+  const name = CS_TEAM[team][csPick[team]++ % 4], data = CSM[name], info = csInfo(data), mdl = new MDLModel(data, { material: csMat });
+  mdl.mesh.castShadow = true;
+  const s = { cs: true, gl: true, hit: [], mdl, data, info, gait: { i: -1, t: 0 }, up: { i: -1, t: 0, once: false }, kick: 0, lastKick: 0, aim: 0, dead: null };
+  const root = s.root = new THREE.Group(); root.rotation.order = "YXZ";
+  const body = s.body = new THREE.Group(); body.rotation.y = Math.PI; root.add(body); body.add(mdl.root);   // GoldSrc nhìn về -z sau khi đổi trục → quay 180° để nhìn +z
+  if (info.foot == null){ csApply(mdl, data.seqs[info.si.idle1 ?? 0], 0); mdl.root.updateMatrixWorld(true);
+    const lo = ["Bip01 L Toe0", "Bip01 R Toe0", "Bip01 L Foot", "Bip01 R Foot"].map(n => mdl.bones[info.bi[n]]).filter(Boolean).map(b => b.getWorldPosition(new V3()).y);
+    info.foot = lo.length ? -Math.min(...lo) + .02 : .92; }
+  body.position.y = info.foot;
+  const hm = new THREE.MeshBasicMaterial({ visible: false });
+  const hb = (geo, x, y, z, type) => { const m = new THREE.Mesh(geo, hm); m.position.set(x, y, z); m.userData.hit = type; m.userData.bot = owner; root.add(m); s.hit.push(m); return m; };
+  s.headHit = hb(new THREE.SphereGeometry(.15, 8, 6), 0, 1.62, .05, "head");
+  hb(new THREE.BoxGeometry(.48, .62, .32), 0, 1.15, .03, "body"); hb(new THREE.BoxGeometry(.42, .85, .3), 0, .43, 0, "limb");
+  s.gunPivot = new THREE.Group(); root.add(s.gunPivot);
+  s.flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: texGlow, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true })); s.flash.scale.setScalar(.5); s.flash.visible = false; s.gunPivot.add(s.flash);
+  s.headBone = mdl.bones[info.bi["Bip01 Head"]]; s.hand = mdl.bones[info.bi["Bip01 R Hand"]];
+  scene.add(root); return s;
+}
+// gắn súng cầm tay p_<súng>.mdl: mỗi xương cùng tên lấy theo xương người
+function csSetGun(s, wi){
+  if (s.pm){ s.pm.root.parent?.remove(s.pm.root); s.pm = null; }
+  const id = WEAPONS[wi].id, n = GSV[id], d = n && CSM["p_" + n]; s.ext = CS_EXT[id] || "onehanded"; s.up.i = -1;
+  if (!d) return;
+  const pm = new MDLModel(d, { material: csMat }); pm.mesh.castShadow = true; s.body.add(pm.root);
+  pm.map = d.bones.map(b => s.info.bi[b.name] ?? -1); pm.flashBone = d.bones.findIndex(b => /flash/i.test(b.name)); s.pm = pm;
+}
+function poseCS(s, dt, speed, aimT, pitch, dead){
+  const m = s.mdl, I = s.info, seqOf = n => I.si[n] ?? -1;
+  if (dead){
+    if (!s.dead){ const opts = ["death1", "death2", "death3", "gutshot", "head", "back", "left", "right"].map(seqOf).filter(i => i >= 0); s.dead = { i: opts[Math.random() * opts.length | 0], t: 0 }; if (s.pm) s.pm.root.visible = false; }
+    const q = m.data.seqs[s.dead.i]; s.dead.t = Math.min(s.dead.t + dt * q.fps, q.frames - 1); csApply(m, q, s.dead.t);
+  } else {
+    if (s.dead){ s.dead = null; s.gait.i = s.up.i = -1; if (s.pm) s.pm.root.visible = true; }
+    const gn = speed > 3 ? "run" : speed > .35 ? "walk" : "idle1", gi = seqOf(gn);
+    if (gi !== s.gait.i){ s.gait.i = gi; s.gait.t = 0; }
+    const gq = m.data.seqs[gi]; s.gait.t += dt * gq.fps * (gn === "run" ? clamp(speed / 5.2, .6, 1.5) : gn === "walk" ? clamp(speed / 1.8, .6, 1.6) : 1);
+    if (s.kick > s.lastKick + .5){ const si = seqOf("ref_shoot_" + s.ext); if (si >= 0){ s.up.i = si; s.up.t = 0; s.up.once = true; } }
+    s.lastKick = s.kick;
+    if (s.up.i < 0 || (s.up.once && s.up.t >= m.data.seqs[s.up.i].frames - 1)){ s.up.i = seqOf("ref_aim_" + s.ext); if (s.up.i < 0) s.up.i = seqOf("ref_aim_onehanded"); s.up.t = 0; s.up.once = false; }
+    const uq = m.data.seqs[s.up.i]; s.up.t += dt * uq.fps;
+    csApply(m, gq, s.gait.t, I.upper, false); csApply(m, uq, s.up.once ? Math.min(s.up.t, uq.frames - 1) : s.up.t, I.upper, true, -pitch * 57.3 * clamp(aimT * 1.2, .3, 1));
+  }
+  s.kick *= Math.exp(-dt * 18);
+  if (s.pm){ const pm = s.pm; for (let b = 0; b < pm.bones.length; b++){ const j = pm.map[b]; if (j >= 0){ pm.bones[b].position.copy(m.bones[j].position); pm.bones[b].quaternion.copy(m.bones[j].quaternion); } } }
+  s.root.updateMatrixWorld(true);
+  const fb = s.pm && s.pm.flashBone >= 0 ? s.pm.bones[s.pm.flashBone] : s.hand;
+  if (fb){ fb.getWorldPosition(_a); s.root.worldToLocal(_a); s.gunPivot.position.copy(_a); if (!s.pm || s.pm.flashBone < 0) s.gunPivot.position.z += .35; }
+  if (s.headBone){ s.headBone.getWorldPosition(_b); s.root.worldToLocal(_b); s.headHit.position.set(_b.x, _b.y + .04, _b.z); }
+}
+// con tin: hostage.mdl, đi / chạy / đứng chờ (idle1) hoặc sợ hãi (fear1) khi chưa có ai dẫn
+function makeHostageCS(h){
+  const data = CSM.hostage, info = csInfo(data), mdl = new MDLModel(data, { material: csMat }); mdl.mesh.castShadow = true;
+  const body = new THREE.Group(); body.rotation.y = Math.PI; h.root.add(body); body.add(mdl.root);
+  if (info.foot == null){ csApply(mdl, data.seqs[info.si.idle1 ?? 0], 0); mdl.root.updateMatrixWorld(true);
+    const lo = ["Bip02 L Foot", "Bip02 R Foot"].map(n => mdl.bones[info.bi[n]]).filter(Boolean).map(b => b.getWorldPosition(new V3()).y);
+    info.foot = lo.length ? -Math.min(...lo) + .06 : .9; }
+  body.position.y = info.foot; h.cs = { mdl, info, i: -1, t: 0 };
+}
+function poseHostageCS(h, dt){
+  const c = h.cs, I = c.info, n = h.speed > 2.8 ? "run" : h.speed > .5 ? "walk" : h.leader ? "idle1" : "fear1", i = I.si[n] ?? I.si.idle1;
+  if (i !== c.i){ c.i = i; c.t = 0; }
+  const q = c.mdl.data.seqs[i]; c.t += dt * q.fps * (n === "run" ? clamp(h.speed / 4.6, .6, 1.4) : n === "walk" ? clamp(h.speed / 1.6, .6, 1.4) : 1); csApply(c.mdl, q, c.t);
+}
 const eachMat = (o, fn) => (Array.isArray(o.material) ? o.material : [o.material]).forEach(fn);
 
 function buildPistol(lod){
@@ -2633,7 +2834,7 @@ function makeVmGL(w){
 // view-model CS 1.6: dùng nguyên hoạt cảnh của model (idle / shoot / reload / draw), tiếng thay đạn lấy từ sự kiện 5004
 function makeVmGS(w, data){
   const m = new MDLModel(data, { mirror: true }), root = new THREE.Group(); root.add(m.root);
-  const unsil = w.id === "usp" || w.id === "m4a1", names = data.seqs.map(s => s.pose ? s.name.toLowerCase() : "");
+  const unsil = w.id === "usp" || w.id === "m4a1", names = data.seqs.map(s => s.ok ? s.name.toLowerCase() : "");
   const all = re => names.map((n, i) => re.test(n) ? i : -1).filter(i => i >= 0);
   const one = (...res) => { for (const re of res){ const i = names.findIndex(n => re.test(n)); if (i >= 0) return i; } return -1; };
   const sil = n => unsil ? n.endsWith("_unsil") : !n.endsWith("_unsil");
@@ -2769,6 +2970,7 @@ function poseGL(s, dt, speed, aimT, pitch, dead, strafe){
   s.headBone.getWorldPosition(_b); s.root.worldToLocal(_b); s.headHit.position.set(_b.x, _b.y + .08, _b.z);
 }
 function makeSoldier(team, owner){
+  if (CS_OK) return makeSoldierCS(team, owner);
   if (GL) return makeSoldierGL(team, owner);
   const T = TEAM[team], s = { hit: [] };
   const mU = M({ map: texCamo, color: T.uniform }), mV = M({ color: T.vest, roughness: .8 }), mP = M({ map: texCamo, color: T.pants }), mH = M({ color: T.helmet, roughness: .55 });
@@ -2831,6 +3033,7 @@ function makeSoldier(team, owner){
 }
 const L1 = .29, L2 = .28;
 function poseSoldier(s, dt, speed, aimT, pitch, dead, strafe = 0){
+  if (s.cs) return poseCS(s, dt, speed, aimT, pitch, dead);
   if (s.gl) return poseGL(s, dt, speed, aimT, pitch, dead, strafe);
   s.aim = lerp(s.aim, aimT, 1 - Math.exp(-dt * 9)); s.kick *= Math.exp(-dt * 18);
   const amp = clamp(speed / 4.2, 0, 1.1); s.phase += dt * (2.4 + speed * 2.1) * (speed > .2 ? 1 : 0);
@@ -3177,6 +3380,7 @@ const botSide = b => IDX[b.team ? "glock" : "usp"];
 function setBotGun(b, wi){
   b.wi = wi; b.clip = WEAPONS[wi].clip; b.reloadT = 0;
   const s = b.model; if (s.gunWi === wi) return; s.gunWi = wi;
+  if (s.cs){ csSetGun(s, wi); return; }
   const k = s.gl ? .85 : 1;
   if (s.gun){ s.gunPivot.remove(s.gun); s.gun.traverse(o => { if (o.isMesh){ o.geometry.dispose(); if (!sharedMats.has(o.material)) o.material.dispose?.(); } }); }
   s.gun = WEAPONS[wi].build(true); s.gun.rotation.y = Math.PI; s.gun.scale.setScalar(k); s.gun.traverse(o => { if (o.isMesh) o.castShadow = true; }); s.gunPivot.add(s.gun);
@@ -3365,7 +3569,8 @@ function makeHostage(i){
   const h = { isHostage: true, name: "Con tin " + (i + 1), pos: new V3(), vy: 0, onGround: true, radius: .35, height: 1.7, leader: null, claim: null, rescued: false,
     trail: [], speed: 0, yaw: 0, stuckT: 0, stuckAcc: 0, lastPos: new V3(), teleports: 0, home: HOSTAGE_SPOTS[i], cur: null };
   const root = h.root = new THREE.Group(); root.rotation.order = "YXZ";
-  if (GL){
+  if (CS_OK) makeHostageCS(h);
+  else if (GL){
     const src = MODELS.soldier, obj = SkeletonUtils.clone(src.scene), mats = new Map();
     const conv = m => { if (!mats.has(m)){ const c = m.clone(); c.roughness = .85; c.metalness = 0; if (HOST_COL[c.name] != null) c.color.set(HOST_COL[c.name]); mats.set(m, c); } return mats.get(m); };
     obj.traverse(o => { if (o.isMesh){ o.castShadow = true; o.frustumCulled = false; o.material = Array.isArray(o.material) ? o.material.map(conv) : conv(o.material); } });
@@ -3377,6 +3582,7 @@ function makeHostage(i){
   root.visible = false; scene.add(root); return h;
 }
 function poseHostage(h, dt){
+  if (h.cs) return poseHostageCS(h, dt);
   if (!h.mixer) return;
   const name = h.speed > 2.8 ? "Run" : h.speed > .5 ? "Walk" : "Idle_Neutral";
   if (name !== h.cur){ const a = h.acts[name], p = h.acts[h.cur]; a.reset().play(); if (p) a.crossFadeFrom(p, .2, false); h.cur = name; }

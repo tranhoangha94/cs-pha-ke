@@ -168,3 +168,9 @@ Các mục phía dưới là nhật ký cũ. Nếu lệch với đoạn này th�
   - Màn khởi động có trạng thái "Đang tải bản đồ và model…" (#start.loading) — tải xong renderOpts() mới bỏ class loading.
   - Tượng = các vị thần: godGeo(name), statueGeo("tên") tự chuyển sang godGeo; bệ có biển tên khắc (plaqueFor). Trục vào: zeus, hera, athena, ares, apollo, artemis, poseidon, hermes; cạnh khải hoàn môn: aphrodite, dionysus; đỉnh khải hoàn môn: nike.
   - Test chụp ảnh: __g.followSun(x, z) để khung bóng nắng theo camera khi chụp thủ công.
+- 2026-11-18: tượng thần dựng lại bằng SDF + surface nets (sdfMesh, godGeo): cơ thể liền khối, mặt, tóc xoăn, nếp áo; tư thế theo tượng nổi tiếng (Apollo Belvedere, Athena, Artemis Versailles, Aphrodite Milo, Nike...). Bỏ biển tên trên bệ (người dùng không muốn).
+- 2026-11-18: NHÂN VẬT DÙNG MODEL GỐC CS 1.6 (người dùng yêu cầu, repo private): chép từ Material/Counter-Strike 1.6/cstrike/models vào goldsrc/models: player/{gign,sas,gsg9,urban,arctic,guerilla,leet,terror}/*.mdl (~19 MB), hostage.mdl, p_*.mdl (súng cầm tay). sources.txt có ghi.
+  - assets/goldsrc-mdl.js: giải nén hoạt cảnh khi cần (seq.ok, seq.blend(k), seq.blendRange; seq.pose = blend giữa — view-model 1 blend nên không đổi). MDLModel.find dùng s.ok.
+  - index.html: CSM/CS_OK, makeSoldierCS (thân dưới gait idle1/walk/run, thân trên từ Bip01 Spine: ref_aim_/ref_shoot_<đuôi súng CS_EXT> có blend góc ngắm theo pitch, chết: death1/2/3/gutshot/head...), csSetGun ghép xương p_ model, makeHostageCS/poseHostageCS (walk/run/idle1/fear1). Thiếu file → tự quay về glTF cũ.
+  - Hộp trúng đạn giữ như bản glTF (đầu theo xương Bip01 Head). Đã chạy 2 vòng đặt bom: 14 lượt hạ gục, không lỗi.
+- 2026-11-18: bóng bị tách khỏi chân người: do bias PCSS .0012 (~0,4 m) + sun.shadow.bias -0.0006. Đã hạ: tìm vật che .0004, lọc .00025, sun.shadow.bias -0.00025, normalBias .03. Bóng dính chân, tường và cây không bị vằn.
