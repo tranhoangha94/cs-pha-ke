@@ -1208,6 +1208,30 @@ const geCap = (() => { const R = .42, H = 9.2, P = [], y0 = H - R * 1.6;        
   return mergeParts(P); })();
 const geWood = withEnv(M({ map: texWood, color: 0xb07a4c, roughness: .45 }), .5), geCeil = M({ color: 0xece6da, roughness: .8 });
 geFront(19.5, 36, -Math.PI / 2, 12);   // hội trường (ô Trung tâm khởi nghiệp): mặt nam z = 36, cửa chính x 17.5…21.5
+// TÒA G — mặt đông nhìn ra lối đi sinh viên / khu xuất phát Cảnh sát: mái hiên kiểu Hy Lạp một tầng trước cửa chính (4 cột Ionic, dầm, trán hồi
+// tam giác có mặt trời vàng, trần mái hiên ô cờ, bậc thềm) — theo các sảnh lối vào có hàng cột ở VinUni
+{ const X0 = 50, D = 4.2, ZC = 1.5, Wp = 10.4, H = 3.8, R = .3, XF = X0 + D, zs = [-3, 6];   // mái hiên một tầng, 2 cột hai đầu
+  solid(X0, ZC - Wp / 2 - .3, XF + .5, ZC + Wp / 2 + .3, 0, .25, matStone, { tile: 2 });
+  deco(XF + .5, ZC - Wp / 2 - .5, XF + 1.1, ZC + Wp / 2 + .5, 0, .12, matStone, { tile: 2, shadow: false });
+  for (const z of zs){ bake.at(columnGeo(H, R), mArchTrim, XF - .4, .25, z); solid(XF - .78, z - .38, XF - .02, z + .38, .25, H + .25, null);
+    bake.put(boxAt(.18, H, R * 2.2, X0 + .09, .25 + H / 2, z), mArchTrim); }                                                       // trụ áp tường phía sau
+  const Y = .25 + H, ent = [[.28, XF - .02], [.28, XF + .03], [.3, XF + .08]];                                                        // dầm ba lớp
+  let y = Y; for (const [h, f] of ent){ bake.put(boxAt(f - X0, h, Wp + .2, (X0 + f) / 2, y + h / 2, ZC), mArchTrim); y += h; }
+  bake.put(boxAt(D, .65, Wp, X0 + D / 2, y + .325, ZC), mArch); y += .65;                                                            // diềm
+  for (let z = ZC - Wp / 2 + .5; z <= ZC + Wp / 2 - .4; z += 1.5){ const r = new THREE.CylinderGeometry(.12, .12, .05, 14); r.rotateZ(Math.PI / 2); r.translate(XF + .02, y - .325, z); bake.put(r, matTowerGold); }
+  for (let z = ZC - Wp / 2; z <= ZC + Wp / 2 + .01; z += .32) bake.put(boxAt(.16, .13, .15, XF + .1, y - .05, z), mArchTrim);         // răng cưa
+  bake.put(boxAt(D + .55, .2, Wp + .7, X0 + (D + .55) / 2, y + .1, ZC), mArchTrim); bake.put(boxAt(D + .75, .18, Wp + .95, X0 + (D + .75) / 2, y + .29, ZC), mArchTrim); y += .38;
+  const Hp = 2.3, half = Wp / 2 + .3;
+  { const t = new THREE.Shape(); t.moveTo(-half, 0); t.lineTo(half, 0); t.lineTo(0, Hp); t.closePath();
+    const g = new THREE.ExtrudeGeometry(t, { depth: D - .15, bevelEnabled: false }); g.rotateY(Math.PI / 2); g.translate(X0, y, ZC); bake.put(sUV(g, .25), mArch); }
+  const ang = Math.atan2(Hp, half), L = Math.hypot(Hp, half) + .4;
+  for (const sd of [-1, 1]) for (const [h, f, k] of [[.32, XF + .6, .45], [.14, XF + .75, .62]]){ const g = boxAt(f - X0, h, L, (X0 + f) / 2, 0, 0); g.rotateX(sd * ang); g.translate(0, y + Hp / 2 + k * .3, ZC + sd * half / 2); bake.put(g, mArchTrim); }
+  { const sg = sunEmblem(.8); sg.rotateY(Math.PI / 2); sg.translate(X0 + D - .12, y + .95, ZC); bake.put(sg, matTowerGold); }
+  bake.put(boxAt(.8, .45, .8, X0 + D / 2, y + Hp + .2, ZC), mArchTrim); bake.at(urnGeo, mMarbleW, X0 + D / 2, y + Hp + .42, ZC, 0, 1.1);
+  for (const sd of [-1, 1]) bake.at(urnGeo, mMarbleW, XF - .1, y, ZC + sd * (half - .2), 0, 1.0);
+  bake.put(boxAt(D - .05, .12, Wp, X0 + D / 2, Y - .06, ZC), M({ color: 0xece6da, roughness: .8 }));                                  // trần mái hiên
+  for (let z = ZC - Wp / 2 + 1; z < ZC + Wp / 2; z += 1.3) for (const x of [X0 + 1.2, X0 + 2.6]) bake.put(boxAt(1, .06, 1, x, Y - .14, z), mArchTrim);   // ô trần
+}
 bake.flush();
 }
 
@@ -1218,7 +1242,7 @@ for (const [x, z, k] of [[-100, -50, .9], [-86, -50, .9], [-72, -50, .9], [-58, 
   [-4, -44, .8], [26, -24, .8], [54, 50, .8], [108, 96, .8], [66, 120, .8], [-34, 50, .8]]) tree(x, z, k);
 for (const [x, z] of [[-60, 3], [-40, -4], [-40, 6], [-100, -12], [-100, 14], [29, -18], [29, 20], [-20, -30], [-20, 30], [53, -30], [53, 30], [68, -4.3], [84, -4.3], [100, -4.3], [66, 98], [104, 98], [-60, 54], [-20, 58], [20, 58]]) lamp(x, z);
 for (const [x, z, h] of [[-46, -26, 1.2], [-46, 30, 1.2], [-80, -14, 1.3], [-80, 16, 1.3], [-28, -24, 1.2], [-28, 28, 1.2], [10, -40, 1.2], [24, -36, 1.3], [-2, -10, 1.2], [-2, 12, 1.2],
-  [29, -30, 1.2], [29, 32, 1.2], [53, -2, 1.2], [53, 8, 1.3], [44, -38, 1.2], [96, -26, 1.3], [80, -44, 1.2], [104, 60, 1.2], [70, 74, 1.2], [70, 92, 1.3], [104, 100, 1.2],
+  [29, -30, 1.2], [29, 32, 1.2], [53.2, -6.2, 1.2], [53.2, 9.2, 1.3], [44, -38, 1.2], [96, -26, 1.3], [80, -44, 1.2], [104, 60, 1.2], [70, 74, 1.2], [70, 92, 1.3], [104, 100, 1.2],
   [60, 44, 1.2], [-6, 40, 1.2], [-40, 54, 1.3], [-90, 44, 1.2], [-90, -40, 1.2], [-58, -40, 1.2], [-20, -46, 1.2], [46, -54, 1.2], [84, -54, 1.3], [108, -34, 1.2]]) crate(x - .7, z - .7, x + .7, z + .7, h);
 for (const [x, z] of [[-90, -30], [-60, -30], [-90, 30], [-60, 34]]) bench(x - 1.3, z - .25, x + 1.3, z + .25);
 // ---------- bóng tiếp xúc mềm (thay cho ambient occlusion): mỗi khối va chạm chạm đất có một quầng tối mờ dần ra ngoài
@@ -1404,6 +1428,7 @@ const SNDFILES = {
   ric: ["weapons/ric_conc-1.wav", "weapons/ric_conc-2.wav"],
   slash: ["weapons/knife_slash1.wav", "weapons/knife_slash2.wav"],
   knifehit: ["weapons/knife_hit1.wav", "weapons/knife_hit2.wav", "weapons/knife_hit3.wav", "weapons/knife_hit4.wav"],
+  knifewall: ["weapons/knife_hitwall1.wav"],
   nade: ["weapons/hegrenade-1.wav", "weapons/hegrenade-2.wav"], bounce: ["weapons/he_bounce-1.wav"],
   c4: ["weapons/c4_explode1.wav"], plant: ["weapons/c4_plant.wav"], disarm: ["weapons/c4_disarmed.wav"],
   beep: ["weapons/c4_beep1.wav", "weapons/c4_beep3.wav", "weapons/c4_beep5.wav"],
@@ -1532,6 +1557,8 @@ const sfx = {
   impact(vol, pan){ if (!actx || vol < .03) return; if (!playRand("ric", vol * .45, pan, .96 + Math.random() * .08, .12)) noise(.05, vol * .3, "bandpass", 1800, 700, outAt(1, pan)); },
   slash(){ if (actx && !playRand("slash", .5, 0, .98 + Math.random() * .06, .02)) noise(.13, .25, "bandpass", 1800, 500, master); },
   knifeHit(){ if (actx) playRand("knifehit", .6, 0, 1, .02); },
+  stab(){ if (actx && !playRand("slash", .6, 0, .8 + Math.random() * .05, .02)) noise(.18, .3, "bandpass", 1200, 400, master); },
+  knifeWall(){ if (actx && !playRand("knifewall", .5, 0, 1, .02)) noise(.06, .3, "bandpass", 2600, 900, master); },
   bounce(vol){ if (actx && !playRand("bounce", vol, 0, .9 + Math.random() * .2, .05)) noise(.04, vol, "bandpass", 2400, 900, master); },
   boom(kind, vol){ if (!actx) return; if (!playRand(kind, vol, 0, 1, .35)) gunshot("shotgun", vol, 0); },
   plant(){ if (actx && !playRand("plant", .7, 0, 1, .08)){ tone(.15, .35, 1200, 1200, master, "square"); tone(.25, .3, 900, 600, master, "square", .16); } },
@@ -2453,6 +2480,7 @@ function makeVmGS(w, data){
   const play = (name, dur, n = 0) => {
     if (name === "Idle") m.play(idle, { loop: true });
     else if (name === "Draw") m.play(draw >= 0 ? draw : idle, { then: toIdle });
+    else if (name === "Stab"){ const st = n ? one(/^stab$/) : one(/^stab_miss$/, /^stab$/); m.play(st >= 0 ? st : shoots[0], { then: toIdle }); }
     else if (name === "Shoot"){
       const list = left.length && right.length ? (shotN++ & 1 ? right : left) : shoots;
       m.play(n && empty.length ? empty[0] : list[Math.random() * list.length | 0], { then: toIdle });
@@ -2773,12 +2801,20 @@ function fire(){
 }
 const raycaster = new THREE.Raycaster(); let enemyHit = [];
 function hitMark(head){ const hm = $("hitm"); hm.classList.remove("show", "head"); void hm.offsetWidth; hm.classList.add("show"); if (head) hm.classList.add("head"); sfx.hit(head); }
-function knifeAttack(w){
-  fireCd = w.delay; kick.zv -= 5.5; kick.rzv += 9; kick.rxv -= 3; sfx.slash(); if (vm[cur].gs) vm[cur].play("Shoot");
+// chém (nút bắn) hoặc đâm (nút ngắm): đâm tầm ngắn hơn, chậm hơn, mạnh hơn; đâm từ phía sau lưng (nhìn cùng hướng với đối thủ) ×3
+function knifeAttack(w, stab = false){
+  const S = stab && w.stab, range = S ? S.range : 2.3;
+  fireCd = S ? S.delay : w.delay;
+  if (S){ kick.zv -= 9; kick.rxv -= 1.5; sfx.stab(); } else { kick.zv -= 5.5; kick.rzv += 9; kick.rxv -= 3; sfx.slash(); }
   camera.updateMatrixWorld(); const o = camera.getWorldPosition(new V3()), f = camera.getWorldDirection(new V3());
-  const wall = rayBoxes(o.x, o.y, o.z, f.x, f.y, f.z, 2.3); raycaster.set(o, f); raycaster.far = wall ? wall.t : 2.3;
+  const wall = rayBoxes(o.x, o.y, o.z, f.x, f.y, f.z, range); raycaster.set(o, f); raycaster.far = wall ? wall.t : range;
   const h = raycaster.intersectObjects(enemyHit, false).find(x => x.object.userData.bot.alive);
-  if (h){ const head = h.object.userData.hit === "head"; damage(h.object.userData.bot, w.dmg * (head ? w.head : 1), player, head, "knife"); blood(h.point, f, h.object.userData.bot.pos.y, 10); hitMark(head); sfx.knifeHit(); }
+  if (vm[cur].gs) vm[cur].play(S ? "Stab" : "Shoot", 0, h ? 1 : 0);
+  if (h){ const b = h.object.userData.bot, head = h.object.userData.hit === "head";
+    const back = S && Math.sin(b.yaw) * f.x + Math.cos(b.yaw) * f.z > .5;                      // cùng hướng nhìn với đối thủ = đứng sau lưng
+    const dmg = (S ? S.dmg * (back ? S.back : 1) : w.dmg) * (head ? w.head : 1);
+    damage(b, dmg, player, head, "knife"); blood(h.point, f, b.pos.y, S ? 16 : 10); hitMark(head || back); sfx.knifeHit(); }
+  else if (wall && S) sfx.knifeWall();
 }
 // ---------- lựu đạn: ném, nảy trên tường/sàn, nổ sau 1,9 giây
 const liveNades = [], nadePool = [];
@@ -3643,6 +3679,7 @@ function updatePlayer(dt){
   adsK = lerp(adsK, ads && reloadT <= 0 && switchT <= 0 && W().canAds !== false ? 1 : 0, 1 - Math.exp(-dt * 16));
   const fov = lerp(74, W().adsFov || (W().cls === "rifle" ? 52 : 62), adsK); if (Math.abs(camera.fov - fov) > .05){ camera.fov = fov; camera.updateProjectionMatrix(); }
   if (buyOpen || W().cls === "nade") firePressed = false; else if (fireHeld && (W().auto || firePressed)){ firePressed = false; fire(); }
+  if (ads && !buyOpen && W().cls === "knife" && player.alive && switchT <= 0 && fireCd <= 0) knifeAttack(W(), true);   // giữ nút ngắm khi cầm dao = đâm
   if (nadeHold >= 0){ if (W().cls !== "nade" || !player.alive) nadeHold = -1; else nadeHold += dt; }
   { const el = $("nadePow"); if (nadeHold >= 0){ el.style.display = "block"; el.firstChild.style.width = (clamp(nadeHold / NADE_FULL, 0, 1) * 100).toFixed(0) + "%"; } else if (el.style.display !== "none") el.style.display = "none"; }
 }

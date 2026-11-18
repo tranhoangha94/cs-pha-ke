@@ -53,7 +53,9 @@ export const WEAPON_CATALOG = [
   copy(rifle, { id: "m249", name: "M249", mesh: "m249", cat: "mgs", spd: .87, price: 5750, snd: "rifle", delay: .08, dmg: 28, clip: 100, reserve: 200, clipCost: 100, reload: 4.2,
     spread: { base: .006, inc: .0024, move: .03, air: .07 } }),
 
-  { id: "knife", name: "Knife", spd: 1.24, cls: "knife", cat: "melee", mesh: "knife", slot: 3, auto: false, delay: .5, dmg: 55, head: 2, pellets: 0, clip: 1, reserve: 0, reload: 1, canAds: false,
+  { id: "knife", name: "Knife", spd: 1.24, cls: "knife", cat: "melee", mesh: "knife", slot: 3, auto: false, delay: .5, dmg: 55, head: 2,
+    stab: { dmg: 65, delay: 1, range: 1.8, back: 3 },   // nút ngắm: đâm — tầm ngắn hơn, chậm hơn, đâm sau lưng ×3 (như CS 1.6)
+    pellets: 0, clip: 1, reserve: 0, reload: 1, canAds: false,
     spread: { base: .001, inc: 0, move: 0, air: 0 }, recoil: { v: 0, h: 0, max: 1, rec: 9 }, kick: { z: 0, rx: 0, bolt: 0 }, hip: [.15, -.08, -.32], tracer: 0 },
 
   copy(nade, { id: "he", name: "HE Grenade", kind: "he", price: 300, max: 1, dmg: 130 }),
