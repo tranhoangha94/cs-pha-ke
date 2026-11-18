@@ -3793,6 +3793,18 @@ const POST = location.search.includes("nofx") ? null : (() => {
   return { render(){ renderer.autoClear = true; composer.render(); renderer.autoClear = false; }, composer, ao, bloom, grade };   // N8AO vẽ cảnh vào target riêng và cần xoá tự động
 })();
 
+// tự hạ hậu kỳ khi máy không kham nổi: 2 = đủ (AO + quầng sáng), 1 = AO nhẹ không quầng sáng, 0 = tắt. Trung bình khung > 26 ms
+// trong ~1,5 s thì hạ một bậc (chỉ tính lúc đang chơi). ?fx=keep giữ nguyên mức đủ.
+let fxLevel = POST ? 2 : 0, fxSlow = 0, fxAvg = 1 / 60;
+function adaptFx(raw){
+  if (!POST || fxLevel === 0 || !started || location.search.includes("fx=keep")) return;
+  fxAvg += (raw - fxAvg) * .05;
+  fxSlow = fxAvg > .026 ? fxSlow + raw : 0;
+  if (fxSlow > 1.5){ fxSlow = 0; fxAvg = 1 / 60; fxLevel--;
+    if (fxLevel === 1){ POST.bloom.enabled = false; POST.ao.setQualityMode("Low"); POST.ao.configuration.halfRes = true; }
+    console.info("hậu kỳ hạ xuống mức", fxLevel); }
+}
+
 const clock = new THREE.Clock();
 function tick(dt){
   if (flashLeft > 0){ flashLeft = Math.max(0, flashLeft - dt); $("flash").style.opacity = Math.min(.92, flashLeft / 1.1); } else if ($("flash").style.opacity !== "0") $("flash").style.opacity = "0";
@@ -3806,19 +3818,21 @@ function tick(dt){
 }
 function frame(){
   requestAnimationFrame(frame);
-  const dt = Math.min(.05, clock.getDelta()), wt = clock.elapsedTime;
+  const raw = Math.min(.2, clock.getDelta()), wt = clock.elapsedTime;
+  adaptFx(raw);
   for (let i = 0; i < canopies.length; i++){ const c = canopies[i]; c.rotation.x = Math.sin(wt * 1.15 + c.userData.ph) * .02; c.rotation.z = Math.cos(wt * .85 + c.userData.ph) * .028; }
   texWaterN.offset.set(wt * .018, wt * .011); texLakeN.offset.set(wt * .007, wt * .004);
-  if (started && (locked || NOLOCK) && !window.__manual) tick(dt);
+  if (started && (locked || NOLOCK) && !window.__manual){   // máy chậm thì chia thành nhiều bước nhỏ: game không bị "quay chậm" khi FPS thấp
+    const n = Math.ceil(raw / .034); for (let i = 0; i < n; i++) tick(raw / n); }
   followSun(camera.position.x, camera.position.z);
-  if (POST) POST.render(); else { renderer.clear(); renderer.render(scene, camera); }
+  if (POST && fxLevel > 0) POST.render(); else { renderer.clear(); renderer.render(scene, camera); }
   if (!scopeOn){ renderer.setRenderTarget(null); renderer.clearDepth(); renderer.render(vmScene, vmCamera); }
 }
 frame();
 window.__g = { get audio(){ return actx && { state: actx.state, clips: Object.fromEntries(Object.entries(clips).map(([k, v]) => [k, v.map(b => { const d = b.getChannelData(0); let p = 0; for (let i = 0; i < d.length; i++) p = Math.max(p, Math.abs(d[i])); return [+b.duration.toFixed(2), +p.toFixed(2)]; })])) }; }, inv, IDX, WEAPONS, buyKey, toggleBuy, get money(){ return money; }, set money(v){ money = v; }, get cur(){ return cur; }, get nades(){ return gren.he; }, gren, EQUIP, get helmet(){ return helmet; }, get defuseKit(){ return defuseKit; }, liveNades, BIND, press, release, keys, vm, GL, tick, score, player, bots, nodes, colliders, fire, switchTo, startReload, recoil, get yaw(){ return yaw; }, set yaw(v){ yaw = v; }, get pitch(){ return pitch; }, set pitch(v){ pitch = v; }, set held(v){ fireHeld = v; firePressed = v; }, camera, wst,
   OPT, setupMatch, hostages, floorGuns, dropGun, pickUpGun, useTarget, bomb, SITES, startRound, endRound, useAction, groundAt, moveBody, siteAt, inSpawnZone,
   get mode(){ return MODE; }, get PT(){ return PT; }, get roundT(){ return roundT; }, set roundT(v){ roundT = v; }, get roundState(){ return roundState; }, get roundNo(){ return roundNo; },
-  vmCamera, vmScene, renderer, POST, GSMDL, GSWM, get actx(){ return actx; }, get master(){ return master; }, get rescued(){ return rescued; }, get matchOver(){ return matchOver; }, get armor(){ return armor; }, get enemyHit(){ return enemyHit; }, get radioN(){ return radioN; }, get opera(){ return operaGain ? +operaGain.gain.value.toFixed(3) : 0; }, playPath };
+  vmCamera, vmScene, renderer, POST, get fxLevel(){ return fxLevel; }, GSMDL, GSWM, get actx(){ return actx; }, get master(){ return master; }, get rescued(){ return rescued; }, get matchOver(){ return matchOver; }, get armor(){ return armor; }, get enemyHit(){ return enemyHit; }, get radioN(){ return radioN; }, get opera(){ return operaGain ? +operaGain.gain.value.toFixed(3) : 0; }, playPath };
 </script>
 </body>
 </html>
