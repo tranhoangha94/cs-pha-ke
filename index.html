@@ -3687,7 +3687,7 @@ function useTarget(){
 }
 function useAction(){
   const t = useTarget(); if (!t) return;
-  if (t.kind === "gun"){ pickUpGun(t.f); return; }
+  if (t.kind === "gun"){ pickUpGun(t.f, true); return; }
   const h = t.h;
   if (h.leader === player){ h.leader = null; h.trail.length = 0; notice("CON TIN ĐỨNG CHỜ"); }
   else { h.leader = player; h.claim = null; h.trail.length = 0; notice("CON TIN ĐANG ĐI THEO BẠN"); }
@@ -3733,18 +3733,19 @@ function dropGun(wi, x, y, z, clip, reserve, opt){
 function spawnDmGuns(){
   for (const [id, x, z] of DM_GUNS){ const w = WEAPONS[IDX[id]], n = nearestNode({ x, y: 0, z }); dropGun(IDX[id], n.x, n.y, n.z, w.clip, w.reserve, { pin: true }); }   // bám vào điểm đi được gần nhất
 }
-function pickUpGun(f){
+// manual = bấm E (đổi súng / nhặt chủ động) → cầm luôn món vừa nhặt; đi ngang qua tự nhặt → giữ nguyên vũ khí đang cầm
+function pickUpGun(f, manual = false){
   const w = WEAPONS[f.wi], slot = w.slot, old = inv[slot];
   if (w.cls === "nade"){ if (gren[w.kind] >= (w.max || 1)){ notice("ĐÃ ĐỦ " + w.name.toUpperCase()); return; } }
   const home = f.home;
   if (w.cls !== "nade" && old != null && old !== IDX.knife){ const a = Math.random() * 6.283; dropGun(old, f.pos.x + Math.cos(a) * .45, player.pos.y, f.pos.z + Math.sin(a) * .45, wst[old].clip, wst[old].reserve); }
   const wasCur = old === cur || f.wi === cur;
   removeGun(f); if (home) dmPads.push({ ...home, t: 12 });
-  inv[slot] = f.wi;
+  if (!(w.cls === "nade" && old != null)) inv[slot] = f.wi;              // lựu đạn: ô 4 giữ loại đang chọn, chỉ cộng số lượng
   if (w.cls === "nade"){ gren[w.kind] = Math.min(w.max || 1, gren[w.kind] + 1); wst[f.wi].clip = 1; wst[f.wi].reserve = 0; }
   else { wst[f.wi].clip = f.clip; wst[f.wi].reserve = f.reserve; }
-  if (wasCur){ vm[cur].root.visible = false; cur = f.wi; vm[cur].root.visible = true; if (vm[cur].gl) vm[cur].play("Idle"); reloadT = 0; pending = -1; switchT = 0; }
-  else switchTo(f.wi);
+  if (manual){ if (wasCur){ vm[cur].root.visible = false; cur = f.wi; vm[cur].root.visible = true; if (vm[cur].gl) vm[cur].play("Idle"); reloadT = 0; pending = -1; switchT = 0; }
+    else switchTo(f.wi); }
   sfx.click(0, .5); sfx.click(.1, .4); hudAmmo(); notice("ĐÃ NHẶT " + w.name.split(" · ")[0]);
 }
 function updateFloorGuns(dt){
